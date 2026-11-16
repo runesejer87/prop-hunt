@@ -1,11 +1,18 @@
 import Phaser from "phaser";
 import { Client, Callbacks, type Room } from "@colyseus/sdk";
+import { Fog } from "./Fog.ts";
+import { Hud } from "./Hud.ts";
 import {
   ROOM_NAME,
   SERVER_PORT,
   MSG_INPUT,
   MSG_DISGUISE,
   MSG_UNDISGUISE,
+  MSG_ATTACK,
+  MSG_SWING,
+  type SwingEvent,
+  ATTACK_RANGE,
+  VISION_RADIUS,
   PROP_TYPES,
   PLACED_PROPS,
   nearestDisguisableProp,
@@ -30,8 +37,13 @@ export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"W" | "A" | "S" | "D", Phaser.Input.Keyboard.Key>;
   private lastInput = { dx: 0, dy: 0 };
-  private status!: Phaser.GameObjects.Text;
-  private prompt!: Phaser.GameObjects.Text;
+  private hud!: Hud;
+  private fog!: Fog;
+  private connected = false;
+  private styleOf = new Map<string, string>();
+  private reticle!: Phaser.GameObjects.Graphics;
+  private hunterRing!: Phaser.GameObjects.Arc;
+  private keySpace!: Phaser.Input.Keyboard.Key;
   private skins = new Map<string, Phaser.GameObjects.Image>();
   private selfRing?: Phaser.GameObjects.Arc;
   private keyE!: Phaser.Input.Keyboard.Key;
@@ -52,13 +64,13 @@ export class GameScene extends Phaser.Scene {
     this.keyE = this.input.keyboard!.addKey("E");
     this.keyQ = this.input.keyboard!.addKey("Q");
 
-    this.status = this.add.text(12, 12, "Connecting…", { color: "#fff" }).setScrollFactor(0).setDepth(100);
-    this.prompt = this.add
-      .text(0, 0, "", { fontFamily: "sans-serif", fontSize: "18px", color: "#fff", backgroundColor: "#000000a0", padding: { x: 10, y: 6 } })
-      .setOrigin(0.5, 1)
-      .setScrollFactor(0)
-      .setDepth(100)
-      .setVisible(false);
+    this.keySpace = this.input.keyboard!.addKey("SPACE");
+    this.hud = new Hud(this);
+    this.fog = new Fog(this, WORLD_WIDTH, WORLD_HEIGHT);
+    this.reticle = this.add.graphics().setDepth(60);
+    // Props can see roughly what the hunter can see.
+    this.hunterRing = this.add.circle(0, 0, VISION_RADIUS).setStrokeStyle(2, 0xef4444, 0.5).setDepth(3).setVisible(false);
+    this.input.on("pointerdown", () => this.swing());
     void this.connect();
   }
 
@@ -193,7 +205,7 @@ export class GameScene extends Phaser.Scene {
       const serverUrl = import.meta.env.VITE_SERVER_URL || `ws://${location.hostname}:${SERVER_PORT}`;
       const client = new Client(serverUrl);
       this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {}, GameState);
-      this.status.setText("WASD / arrows: move   E: become nearby object   Q: back to normal");
+      this.connected = true;
 
       const callbacks = Callbacks.get(this.room);
       callbacks.onAdd("players", (p: PlayerState, id: string) => {
@@ -205,12 +217,17 @@ export class GameScene extends Phaser.Scene {
         this.sprites.delete(id);
         this.skins.get(id)?.destroy();
         this.skins.delete(id);
+        this.styleOf.delete(id);
         if (id === this.room?.sessionId) this.selfRing?.destroy();
       });
-      this.room.onLeave(() => this.status.setText("Disconnected"));
+      this.room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
+      this.room.onLeave(() => {
+        this.connected = false;
+      });
     } catch (err) {
       console.error(err);
-      this.status.setText(`Could not connect to server: ${(err as Error)?.message ?? err}`);
+      this.hud.update({ connected: true, phase: "", timeLeft: 0, winner: "", role: "", alive: true, hp: 0, playerCount: 0, propsLeft: 0 });
+      this.add.text(12, 12, `Could not connect to server: ${(err as Error)?.message ?? err}`, { color: "#fff" }).setScrollFactor(0).setDepth(100);
     }
   }
 
@@ -221,25 +238,92 @@ export class GameScene extends Phaser.Scene {
     if (isMe) this.cameras.main.startFollow(dot, true, 0.15, 0.15);
   }
 
+  // ------------------------------------------------------------- hunter
+
+  private get me(): PlayerState | undefined {
+    return this.room?.state.players.get(this.room.sessionId);
+  }
+
+  private canSwing(): boolean {
+    const me = this.me;
+    return !!this.room && !!me && me.role === "hunter" && this.room.state.phase === "hunt";
+  }
+
+  private swing() {
+    if (!this.canSwing()) return;
+    const ptr = this.input.activePointer;
+    this.room!.send(MSG_ATTACK, { x: ptr.worldX, y: ptr.worldY });
+  }
+
+  /** A quick ring and message where a swing landed. */
+  private showSwing(e: SwingEvent) {
+    const color = e.result === "player" ? 0x4ade80 : e.result === "prop" ? 0xef4444 : 0xaaaaaa;
+    const ring = this.add.circle(e.x, e.y, 8).setStrokeStyle(3, color).setDepth(70);
+    this.tweens.add({ targets: ring, radius: 30, alpha: 0, duration: 300, onComplete: () => ring.destroy() });
+    if (e.result === "nothing") return;
+    const label = this.add
+      .text(e.x, e.y - 20, e.result === "player" ? "FOUND!" : "Just an object", {
+        fontFamily: "sans-serif",
+        fontSize: "16px",
+        color: e.result === "player" ? "#9dffa8" : "#ff8a8a",
+        stroke: "#000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(70);
+    this.tweens.add({ targets: label, y: label.y - 26, alpha: 0, duration: 900, onComplete: () => label.destroy() });
+  }
+
+  // ------------------------------------------------------------- frame
+
+  /** Colour, visibility and transparency of each player's dot / disguise. */
+  private styleAndVisibility(id: string, p: PlayerState, dot: Phaser.GameObjects.Arc, myRole: string) {
+    const isMe = id === this.room!.sessionId;
+    const ghost = !p.alive || p.role === "spectator";
+    const key = `${p.role}|${ghost}|${isMe}`;
+    if (this.styleOf.get(id) !== key) {
+      this.styleOf.set(id, key);
+      const color = p.role === "hunter" ? 0xef4444 : isMe ? 0x4ade80 : 0xf59e0b;
+      dot.setFillStyle(color, ghost ? 0.35 : 1);
+    }
+    // The hunter never sees ghosts; everyone else sees them faintly.
+    const hidden = ghost && myRole === "hunter";
+    const skin = this.skins.get(id);
+    dot.setVisible(!skin && !hidden);
+    skin?.setVisible(!hidden).setAlpha(ghost ? 0.35 : 1);
+  }
+
   update(_time: number, delta: number) {
-    if (!this.room) return;
+    const room = this.room;
+    const state = room?.state;
+    const me = this.me;
+    if (!room || !state || !me) {
+      this.hud.update({ connected: this.connected || !room, phase: "", timeLeft: 0, winner: "", role: "", alive: true, hp: 0, playerCount: 0, propsLeft: 0 });
+      return;
+    }
+    const phase = state.phase;
+    const myDot = this.sprites.get(room.sessionId);
+    const iAmHunter = me.role === "hunter";
+    const frozen = iAmHunter && phase === "hide";
 
     // Send input only when it changes.
-    const dx = (this.cursors.right.isDown || this.wasd.D.isDown ? 1 : 0) - (this.cursors.left.isDown || this.wasd.A.isDown ? 1 : 0);
-    const dy = (this.cursors.down.isDown || this.wasd.S.isDown ? 1 : 0) - (this.cursors.up.isDown || this.wasd.W.isDown ? 1 : 0);
+    const dx = frozen ? 0 : (this.cursors.right.isDown || this.wasd.D.isDown ? 1 : 0) - (this.cursors.left.isDown || this.wasd.A.isDown ? 1 : 0);
+    const dy = frozen ? 0 : (this.cursors.down.isDown || this.wasd.S.isDown ? 1 : 0) - (this.cursors.up.isDown || this.wasd.W.isDown ? 1 : 0);
     if (dx !== this.lastInput.dx || dy !== this.lastInput.dy) {
       this.lastInput = { dx, dy };
-      this.room.send(MSG_INPUT, { dx, dy });
+      room.send(MSG_INPUT, { dx, dy });
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.room.send(MSG_DISGUISE);
-    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) this.room.send(MSG_UNDISGUISE);
+    if (Phaser.Input.Keyboard.JustDown(this.keyE)) room.send(MSG_DISGUISE);
+    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
 
-    this.room.state.players.forEach((p: PlayerState, id: string) => {
+    state.players.forEach((p: PlayerState, id: string) => {
       const dot = this.sprites.get(id);
       if (!dot) return;
+      this.styleAndVisibility(id, p, dot, me.role);
 
-      if (id !== this.room!.sessionId) {
+      if (id !== room.sessionId) {
         // Other players: glide toward the latest server position.
         dot.x = Phaser.Math.Linear(dot.x, p.x, 0.3);
         dot.y = Phaser.Math.Linear(dot.y, p.y, 0.3);
@@ -270,18 +354,57 @@ export class GameScene extends Phaser.Scene {
       const d = this.sprites.get(id);
       if (d) img.setPosition(d.x, d.y);
     });
-    const myDot = this.sprites.get(this.room.sessionId);
-    if (myDot) {
-      this.selfRing?.setPosition(myDot.x, myDot.y);
-      // Hint when there is something to copy nearby.
-      const near = nearestDisguisableProp(myDot.x, myDot.y);
-      const current = this.room.state.players.get(this.room.sessionId)?.disguise;
-      if (near && near.type !== current) {
-        this.prompt.setText(`E: become ${PROP_TYPES[near.type]!.name}`).setVisible(true);
-        this.prompt.setPosition(this.scale.width / 2, this.scale.height - 24);
-      } else {
-        this.prompt.setVisible(false);
+    if (myDot) this.selfRing?.setPosition(myDot.x, myDot.y).setVisible(me.alive);
+
+    // Hunter: limited vision, plus an aiming marker.
+    this.reticle.clear();
+    if (iAmHunter && myDot && (phase === "hide" || phase === "hunt")) {
+      if (phase === "hide") this.fog.blind();
+      else this.fog.see(myDot.x, myDot.y);
+      if (phase === "hunt") {
+        const ptr = this.input.activePointer;
+        const d = Math.hypot(ptr.worldX - myDot.x, ptr.worldY - myDot.y) || 1;
+        const k = Math.min(1, ATTACK_RANGE / d);
+        const ax = myDot.x + (ptr.worldX - myDot.x) * k;
+        const ay = myDot.y + (ptr.worldY - myDot.y) * k;
+        this.reticle.lineStyle(1, 0xffffff, 0.25).strokeCircle(myDot.x, myDot.y, ATTACK_RANGE);
+        this.reticle.lineStyle(2, 0xffffff, 0.9).strokeCircle(ax, ay, 9).lineBetween(ax - 13, ay, ax + 13, ay).lineBetween(ax, ay - 13, ax, ay + 13);
       }
+    } else {
+      this.fog.hide();
     }
+
+    // Everyone else can see roughly where the hunter can see.
+    let hunterDot: Phaser.GameObjects.Arc | undefined;
+    let propsLeft = 0;
+    let playerCount = 0;
+    state.players.forEach((p: PlayerState, id: string) => {
+      playerCount++;
+      if (p.role === "hunter") hunterDot = this.sprites.get(id);
+      if (p.role === "prop" && p.alive) propsLeft++;
+    });
+    const showRing = !iAmHunter && !!hunterDot && (phase === "hide" || phase === "hunt");
+    this.hunterRing.setVisible(showRing);
+    if (showRing && hunterDot) this.hunterRing.setPosition(hunterDot.x, hunterDot.y);
+
+    // Prompt to copy a nearby object (props only).
+    let prompt: string | null = null;
+    if (myDot && me.role === "prop" && me.alive && phase !== "end") {
+      const near = nearestDisguisableProp(myDot.x, myDot.y);
+      if (near && near.type !== me.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
+    }
+    this.hud.setPrompt(prompt);
+
+    this.hud.update({
+      connected: true,
+      phase,
+      timeLeft: state.timeLeft,
+      winner: state.winner,
+      role: me.role,
+      alive: me.alive,
+      hp: me.hp,
+      playerCount,
+      propsLeft,
+    });
   }
 }

@@ -19,7 +19,25 @@ export const TICK_RATE = 30;
 export const PLAYER_SPEED = 180;
 export const PLAYER_RADIUS = 14;
 
-export type Role = "prop" | "hunter";
+/** "spectator" = joined mid-round, watches until the next round. */
+export type Role = "prop" | "hunter" | "spectator";
+export type Phase = "lobby" | "hide" | "hunt" | "end";
+
+/** Round timing, in seconds. */
+export const LOBBY_COUNTDOWN = 5;
+export const HIDE_TIME = 15;
+export const HUNT_TIME = 180;
+export const END_TIME = 7;
+
+/** Hunter rules. */
+export const HUNTER_MAX_HP = 100;
+/** Health lost when the hunter hits something that is not a player. */
+export const WRONG_HIT_PENALTY = 10;
+/** How far from the hunter a swing can land, in pixels. */
+export const ATTACK_RANGE = 64;
+export const ATTACK_COOLDOWN = 0.5;
+/** How far the hunter can see, in pixels. */
+export const VISION_RADIUS = 170;
 
 export const PlayerState = schema(
   {
@@ -30,6 +48,10 @@ export const PlayerState = schema(
     y: t.number(),
     /** Id of the prop this player is disguised as, or "" when not disguised. */
     disguise: t.string(),
+    /** False once the hunter has found you (you become a ghost). */
+    alive: t.boolean(),
+    /** Hunter health. Props ignore this. */
+    hp: t.number(),
   },
   "PlayerState",
 );
@@ -38,6 +60,11 @@ export type PlayerState = SchemaType<typeof PlayerState>;
 export const GameState = schema(
   {
     players: t.map(PlayerState),
+    phase: t.string(),
+    /** Seconds left in the current phase (whole seconds). */
+    timeLeft: t.number(),
+    /** "props" or "hunter" once a round is over, otherwise "". */
+    winner: t.string(),
   },
   "GameState",
 );
@@ -55,3 +82,18 @@ export const MSG_INPUT = "input";
 export const MSG_DISGUISE = "disguise";
 /** Go back to normal. */
 export const MSG_UNDISGUISE = "undisguise";
+
+/** Hunter swings at a point in the world: { x, y }. */
+export const MSG_ATTACK = "attack";
+/** Server tells everyone about a swing, for the on-screen effect. */
+export const MSG_SWING = "swing";
+export interface AttackMessage {
+  x: number;
+  y: number;
+}
+export interface SwingEvent {
+  x: number;
+  y: number;
+  /** What it landed on. */
+  result: "player" | "prop" | "nothing";
+}

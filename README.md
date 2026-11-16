@@ -22,10 +22,19 @@ The server runs on port 2567.
 - `npm run typecheck` – check all packages
 - `npm run build` – build the client for production
 
+## How a round works
+- Needs 2–4 players. A round starts a few seconds after the second player joins.
+- One random player is the **hunter**; the rest are **props**.
+- Hide phase (15 s): props hide; the hunter is blind and frozen.
+- Hunt phase (3 min): the hunter sees only a small circle. Click or Space swings at the mouse.
+  Hitting a hiding player finds them; hitting anything else costs 10 health (starts at 100).
+- Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
+- Props: **E** to become a nearby small object, **Q** to change back. Found props become ghosts.
+- Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
+
 ## Status
-Done: players join a room and move around a map of 9 rooms with walls and doors (shared/src/map.ts).
-Done: 82 props across the rooms. Press E near a small object to become it, Q to change back.
-Next: hunter role with a small vision circle, round timer, win/lose.
+Playable first version. Next ideas: line-of-sight vision (no seeing through walls),
+hiding other players' positions from the hunter on the server, a lock-in-place move for props, sounds, real art.
 
 ## Hosting (Vercel)
 Two Vercel projects from this repo:
