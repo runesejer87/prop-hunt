@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { VISION_RADIUS, Sight } from "@prop-hunt/shared";
 
-const FADE = 60; // soft edge, pixels
-const HALF = VISION_RADIUS + FADE;
+const FADE = 60; // width of the soft edge, pixels; it is fully dark at VISION_RADIUS
+const HALF = VISION_RADIUS;
 const SIZE = HALF * 2;
 
 /**
@@ -56,7 +56,7 @@ export class Fog {
     ctx.globalCompositeOperation = "destination-out";
     const cx = x - left;
     const cy = y - top;
-    const grad = ctx.createRadialGradient(cx, cy, VISION_RADIUS - FADE, cx, cy, VISION_RADIUS + FADE);
+    const grad = ctx.createRadialGradient(cx, cy, VISION_RADIUS - FADE, cx, cy, VISION_RADIUS);
     grad.addColorStop(0, "rgba(0,0,0,1)");
     grad.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = grad;

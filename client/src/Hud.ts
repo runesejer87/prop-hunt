@@ -37,14 +37,14 @@ export class Hud {
 
   setPrompt(text: string | null) {
     const { width, height } = this.scene.scale;
-    if (text) this.prompt.setText(text).setPosition(width / 2, height - 24).setVisible(true);
+    if (text) this.prompt.setText(text).setPosition(width / 2, height - 44).setVisible(true);
     else this.prompt.setVisible(false);
   }
 
   /** Small status line above the prompt, e.g. whether you are a perfect copy yet. */
   setNote(text: string | null, color = "#ffffff") {
     const { width, height } = this.scene.scale;
-    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - 64).setVisible(true);
+    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - 84).setVisible(true);
     else this.note.setVisible(false);
   }
 

@@ -30,6 +30,7 @@ import {
   PLAYER_SPEED,
   GameState,
   type PlayerState,
+  type BodyState,
 } from "@prop-hunt/shared";
 
 export class GameScene extends Phaser.Scene {
@@ -211,11 +212,13 @@ export class GameScene extends Phaser.Scene {
       this.connected = true;
 
       const callbacks = Callbacks.get(this.room);
-      callbacks.onAdd("players", (p: PlayerState, id: string) => {
-        this.addPlayer(p, id);
-        callbacks.listen(p, "disguise", (typeId: string) => this.setSkin(id, typeId));
+      // Bodies are sent only when the server says we may see them (the hunter
+      // gets just the ones in line of sight), so they appear and disappear here.
+      callbacks.onAdd("bodies", (b: BodyState, id: string) => {
+        this.addBody(b, id);
+        callbacks.listen(b, "disguise", (typeId: string) => this.setSkin(id, typeId));
       });
-      callbacks.onRemove("players", (_p: PlayerState, id: string) => {
+      callbacks.onRemove("bodies", (_b: BodyState, id: string) => {
         this.sprites.get(id)?.destroy();
         this.sprites.delete(id);
         this.skins.get(id)?.destroy();
@@ -234,9 +237,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private addPlayer(p: PlayerState, id: string) {
+  private addBody(b: BodyState, id: string) {
     const isMe = id === this.room?.sessionId;
-    const dot = this.add.circle(p.x, p.y, PLAYER_RADIUS, isMe ? 0x4ade80 : 0xf59e0b).setDepth(5);
+    const dot = this.add.circle(b.x, b.y, PLAYER_RADIUS, isMe ? 0x4ade80 : 0xf59e0b).setDepth(5);
     this.sprites.set(id, dot);
     if (isMe) this.cameras.main.startFollow(dot, true, 0.15, 0.15);
   }
@@ -245,6 +248,11 @@ export class GameScene extends Phaser.Scene {
 
   private get me(): PlayerState | undefined {
     return this.room?.state.players.get(this.room.sessionId);
+  }
+
+  /** My own body: the server always sends me this one. */
+  private get myBody(): BodyState | undefined {
+    return this.room?.state.bodies.get(this.room.sessionId);
   }
 
   private canSwing(): boolean {
@@ -300,7 +308,8 @@ export class GameScene extends Phaser.Scene {
     const room = this.room;
     const state = room?.state;
     const me = this.me;
-    if (!room || !state || !me) {
+    const myBody = this.myBody;
+    if (!room || !state || !me || !myBody) {
       this.hud.update({ connected: this.connected || !room, phase: "", timeLeft: 0, winner: "", role: "", alive: true, hp: 0, playerCount: 0, propsLeft: 0 });
       return;
     }
@@ -321,10 +330,11 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
 
-    state.players.forEach((p: PlayerState, id: string) => {
+    state.bodies.forEach((p: BodyState, id: string) => {
       const dot = this.sprites.get(id);
-      if (!dot) return;
-      this.styleAndVisibility(id, p, dot, me.role);
+      const info = state.players.get(id);
+      if (!dot || !info) return;
+      this.styleAndVisibility(id, info, dot, me.role);
 
       if (id !== room.sessionId) {
         // Other players: glide toward the latest server position.
@@ -357,7 +367,7 @@ export class GameScene extends Phaser.Scene {
     this.skins.forEach((img, id) => {
       const d = this.sprites.get(id);
       if (d) img.setPosition(d.x, d.y);
-      const settled = state.players.get(id)?.settled ?? true;
+      const settled = state.bodies.get(id)?.settled ?? true;
       const sway = settled ? 0 : Math.sin(time / 70) * 0.16;
       const pulse = settled ? 1 : 1 + Math.sin(time / 55) * 0.07;
       img.rotation = Phaser.Math.Linear(img.rotation, sway, 0.35);
@@ -365,10 +375,10 @@ export class GameScene extends Phaser.Scene {
     });
     if (myDot) {
       this.selfRing?.setPosition(myDot.x, myDot.y).setVisible(me.alive);
-      if (this.selfRing && this.ringSettled !== me.settled) {
-        this.ringSettled = me.settled;
+      if (this.selfRing && this.ringSettled !== myBody.settled) {
+        this.ringSettled = myBody.settled;
         // Green = perfect copy. Yellow = still wobbling.
-        this.selfRing.setStrokeStyle(2, me.settled ? 0x4ade80 : 0xfacc15);
+        this.selfRing.setStrokeStyle(2, myBody.settled ? 0x4ade80 : 0xfacc15);
       }
     }
 
@@ -417,15 +427,15 @@ export class GameScene extends Phaser.Scene {
     let prompt: string | null = null;
     if (myDot && me.role === "prop" && me.alive && phase !== "end") {
       const near = nearestDisguisableProp(myDot.x, myDot.y);
-      if (near && near.type !== me.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
+      if (near && near.type !== myBody.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
     }
     this.hud.setPrompt(prompt);
 
     // Tell a disguised prop whether it is a perfect copy yet.
     let note: string | null = null;
     let noteColor = "#ffffff";
-    if (me.role === "prop" && me.alive && me.disguise && phase !== "end") {
-      if (me.settled) {
+    if (me.role === "prop" && me.alive && myBody.disguise && phase !== "end") {
+      if (myBody.settled) {
         note = "Perfect copy — you are invisible among the real ones";
         noteColor = "#9dffa8";
       } else {

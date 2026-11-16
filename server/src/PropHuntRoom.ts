@@ -1,7 +1,11 @@
 import { Room, type Client } from "colyseus";
+import { StateView } from "@colyseus/schema";
 import {
   GameState,
   PlayerState,
+  BodyState,
+  Sight,
+  VISION_RADIUS,
   InputMessage,
   AttackMessage,
   SwingEvent,
@@ -35,6 +39,9 @@ import {
   type Phase,
 } from "@prop-hunt/shared";
 
+/** Extra distance beyond the vision radius that the server uses for line-of-sight checks. */
+const REVEAL_MARGIN = 40;
+
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 export class PropHuntRoom extends Room<{ state: GameState }> {
@@ -58,16 +65,17 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     },
     [MSG_DISGUISE]: (client: Client) => {
       const player = this.state.players.get(client.sessionId);
-      if (!player || player.role !== "prop" || !player.alive) return;
-      const prop = nearestDisguisableProp(player.x, player.y);
+      const body = this.state.bodies.get(client.sessionId);
+      if (!player || !body || player.role !== "prop" || !player.alive) return;
+      const prop = nearestDisguisableProp(body.x, body.y);
       if (prop && PROP_TYPES[prop.type]) {
-        if (player.disguise !== prop.type) this.stillFor.set(client.sessionId, 0);
-        player.disguise = prop.type;
+        if (body.disguise !== prop.type) this.stillFor.set(client.sessionId, 0);
+        body.disguise = prop.type;
       }
     },
     [MSG_UNDISGUISE]: (client: Client) => {
-      const player = this.state.players.get(client.sessionId);
-      if (player) this.clearDisguise(player);
+      const body = this.state.bodies.get(client.sessionId);
+      if (body) this.clearDisguise(client.sessionId, body);
     },
     [MSG_ATTACK]: (client: Client, msg: AttackMessage) => this.handleAttack(client.sessionId, msg),
   };
@@ -83,27 +91,86 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const player = new PlayerState();
     player.id = client.sessionId;
     player.name = `Player ${this.clients.length}`;
-    player.disguise = "";
-    player.settled = false;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
     player.role = inRound ? "spectator" : "prop";
     player.alive = !inRound;
-    this.placeRandomly(player);
+
+    const body = new BodyState();
+    body.disguise = "";
+    body.settled = false;
+    this.placeRandomly(body);
+
     this.state.players.set(client.sessionId, player);
+    this.state.bodies.set(client.sessionId, body);
+
+    // Each client gets its own view of the bodies; see syncViews().
+    client.view = new StateView();
+    client.view.add(body);
   }
 
   onLeave(client: Client) {
     this.state.players.delete(client.sessionId);
+    this.state.bodies.delete(client.sessionId);
     this.moveInputs.delete(client.sessionId);
     this.stillFor.delete(client.sessionId);
   }
 
-  private clearDisguise(player: PlayerState) {
-    player.disguise = "";
-    player.settled = false;
-    this.stillFor.delete(player.id);
+  // ------------------------------------------------------------ visibility
+
+  /**
+   * Decide, for every client, which bodies it is allowed to receive.
+   * Props, ghosts and spectators see everyone. The hunter sees only bodies that
+   * are close and in line of sight; nothing at all while blind; everything once the round ends.
+   * Anything not sent can't be read out of the network traffic.
+   */
+  private syncViews() {
+    const phase = this.state.phase as Phase;
+    for (const client of this.clients) {
+      const view = client.view;
+      const me = this.state.players.get(client.sessionId);
+      const myBody = this.state.bodies.get(client.sessionId);
+      if (!view || !me || !myBody) continue;
+
+      const restricted = me.role === "hunter" && (phase === "hide" || phase === "hunt");
+      const sight = restricted && phase === "hunt" ? new Sight(myBody.x, myBody.y, VISION_RADIUS + REVEAL_MARGIN) : undefined;
+
+      this.state.bodies.forEach((body, id) => {
+        let show = true;
+        if (restricted && id !== client.sessionId) {
+          const other = this.state.players.get(id);
+          show = !!sight && !!other && other.role === "prop" && other.alive && this.hunterCanSee(sight, myBody, body, view.has(body));
+        }
+        const shown = view.has(body);
+        if (show && !shown) view.add(body);
+        else if (!show && shown) view.remove(body);
+      });
+    }
+  }
+
+  /** Close enough and in line of sight (centre or any corner of the target). */
+  private hunterCanSee(sight: Sight, from: BodyState, target: BodyState, alreadyVisible: boolean): boolean {
+    // A little slack once visible, so things don't flicker at the edge.
+    const reach = VISION_RADIUS + (alreadyVisible ? REVEAL_MARGIN / 2 : 0);
+    if (Math.hypot(target.x - from.x, target.y - from.y) > reach) return false;
+    const pt = target.disguise ? PROP_TYPES[target.disguise] : undefined;
+    const hw = (pt ? pt.w : PLAYER_RADIUS * 2) / 2;
+    const hh = (pt ? pt.h : PLAYER_RADIUS * 2) / 2;
+    const spots: [number, number][] = [
+      [target.x, target.y],
+      [target.x - hw, target.y - hh],
+      [target.x + hw, target.y - hh],
+      [target.x - hw, target.y + hh],
+      [target.x + hw, target.y + hh],
+    ];
+    return spots.some(([x, y]) => sight.sees(x, y));
+  }
+
+  private clearDisguise(id: string, body: BodyState) {
+    body.disguise = "";
+    body.settled = false;
+    this.stillFor.delete(id);
   }
 
   // ---------------------------------------------------------------- rounds
@@ -122,19 +189,20 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const all = this.players();
     const hunterIndex = Math.floor(Math.random() * all.length);
     all.forEach((p, i) => {
+      const body = this.state.bodies.get(p.id)!;
       p.role = i === hunterIndex ? "hunter" : "prop";
       p.alive = true;
-      this.clearDisguise(p);
       p.hp = HUNTER_MAX_HP;
+      this.clearDisguise(p.id, body);
       if (p.role === "hunter") {
         // The hunter starts in the middle of the hallway.
         const hall = ROOMS.find((r) => r.name === "Hallway")!;
         const c = roomCenter(hall);
-        p.x = c.x;
-        p.y = c.y;
-        this.nudgeToFreeSpot(p);
+        body.x = c.x;
+        body.y = c.y;
+        this.nudgeToFreeSpot(body);
       } else {
-        this.placeRandomly(p);
+        this.placeRandomly(body);
       }
     });
     this.moveInputs.clear();
@@ -149,11 +217,12 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   private backToLobby() {
     for (const p of this.players()) {
+      const body = this.state.bodies.get(p.id)!;
       p.role = "prop";
       p.alive = true;
-      this.clearDisguise(p);
       p.hp = HUNTER_MAX_HP;
-      this.placeRandomly(p);
+      this.clearDisguise(p.id, body);
+      this.placeRandomly(body);
     }
     this.moveInputs.clear();
     this.state.winner = "";
@@ -189,6 +258,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     }
 
     this.movePlayers(dt);
+    this.syncViews();
   }
 
   private checkRoundOver(players: PlayerState[]) {
@@ -203,7 +273,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   private handleAttack(sessionId: string, msg: AttackMessage) {
     const hunter = this.state.players.get(sessionId);
-    if (!hunter || hunter.role !== "hunter" || this.state.phase !== "hunt") return;
+    const hunterBody = this.state.bodies.get(sessionId);
+    if (!hunter || !hunterBody || hunter.role !== "hunter" || this.state.phase !== "hunt") return;
     const now = this.clock.currentTime / 1000;
     if (now < this.attackReadyAt) return;
     this.attackReadyAt = now + ATTACK_COOLDOWN;
@@ -212,14 +283,14 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     let ax = Number(msg?.x);
     let ay = Number(msg?.y);
     if (!Number.isFinite(ax) || !Number.isFinite(ay)) return;
-    const dist = Math.hypot(ax - hunter.x, ay - hunter.y);
+    const dist = Math.hypot(ax - hunterBody.x, ay - hunterBody.y);
     if (dist > ATTACK_RANGE) {
-      ax = hunter.x + ((ax - hunter.x) / dist) * ATTACK_RANGE;
-      ay = hunter.y + ((ay - hunter.y) / dist) * ATTACK_RANGE;
+      ax = hunterBody.x + ((ax - hunterBody.x) / dist) * ATTACK_RANGE;
+      ay = hunterBody.y + ((ay - hunterBody.y) / dist) * ATTACK_RANGE;
     }
 
     // Everything the swing could land on: set pieces and hiding players.
-    type Hit = { kind: "prop" | "player"; d: number; player?: PlayerState };
+    type Hit = { kind: "prop" | "player"; d: number; id?: string };
     let best: Hit | undefined;
     const consider = (hit: Hit) => {
       if (!best || hit.d < best.d) best = hit;
@@ -232,19 +303,22 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     }
     for (const pl of this.players()) {
       if (pl.role !== "prop" || !pl.alive) continue;
-      const pt = pl.disguise ? PROP_TYPES[pl.disguise] : undefined;
+      const body = this.state.bodies.get(pl.id);
+      if (!body) continue;
+      const pt = body.disguise ? PROP_TYPES[body.disguise] : undefined;
       const hw = (pt ? pt.w : PLAYER_RADIUS * 2) / 2 + SLOP;
       const hh = (pt ? pt.h : PLAYER_RADIUS * 2) / 2 + SLOP;
-      if (Math.abs(ax - pl.x) <= hw && Math.abs(ay - pl.y) <= hh)
+      if (Math.abs(ax - body.x) <= hw && Math.abs(ay - body.y) <= hh)
         // Players win ties: a player standing next to their copy is in front.
-        consider({ kind: "player", d: Math.hypot(ax - pl.x, ay - pl.y) - 0.5, player: pl });
+        consider({ kind: "player", d: Math.hypot(ax - body.x, ay - body.y) - 0.5, id: pl.id });
     }
 
     const hit = best as Hit | undefined;
     let result: SwingEvent["result"] = "nothing";
-    if (hit?.kind === "player" && hit.player) {
-      hit.player.alive = false;
-      this.clearDisguise(hit.player);
+    if (hit?.kind === "player" && hit.id) {
+      const found = this.state.players.get(hit.id)!;
+      found.alive = false;
+      this.clearDisguise(hit.id, this.state.bodies.get(hit.id)!);
       result = "player";
     } else if (hit?.kind === "prop") {
       hunter.hp = Math.max(0, hunter.hp - WRONG_HIT_PENALTY);
@@ -257,55 +331,57 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   private movePlayers(dt: number) {
     const frozen = this.state.phase === "hide";
-    this.state.players.forEach((player, id) => {
+    this.state.bodies.forEach((body, id) => {
+      const player = this.state.players.get(id);
+      if (!player) return;
       if (frozen && player.role === "hunter") return; // hunter waits while props hide
       const input = this.moveInputs.get(id);
       const moving = !!input && (input.dx !== 0 || input.dy !== 0);
 
       // Props that stand still for a moment settle into a perfect copy.
-      if (player.disguise) {
+      if (body.disguise) {
         const still = moving ? 0 : (this.stillFor.get(id) ?? 0) + dt;
         this.stillFor.set(id, still);
         const settled = still >= SETTLE_TIME;
-        if (player.settled !== settled) player.settled = settled;
+        if (body.settled !== settled) body.settled = settled;
       }
 
       if (!input || !moving) return;
       // Normalise so diagonal movement isn't faster.
       const len = Math.hypot(input.dx, input.dy);
       const step = PLAYER_SPEED * dt;
-      const next = moveWithCollision(player.x, player.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
-      player.x = next.x;
-      player.y = next.y;
+      const next = moveWithCollision(body.x, body.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
+      body.x = next.x;
+      body.y = next.y;
     });
   }
 
-  /** Put a player on a random open spot in a random room. */
-  private placeRandomly(player: PlayerState) {
+  /** Put a body on a random open spot in a random room. */
+  private placeRandomly(body: BodyState) {
     const room = ROOMS[Math.floor(Math.random() * ROOMS.length)]!;
     const c = roomCenter(room);
-    player.x = c.x;
-    player.y = c.y;
+    body.x = c.x;
+    body.y = c.y;
     for (let i = 0; i < 200; i++) {
       const x = room.x * TILE + (1 + Math.random() * (room.w - 2)) * TILE;
       const y = room.y * TILE + (1 + Math.random() * (room.h - 2)) * TILE;
       if (!isBlocked(x, y, PLAYER_RADIUS + 2)) {
-        player.x = x;
-        player.y = y;
+        body.x = x;
+        body.y = y;
         return;
       }
     }
   }
 
   /** If the spot is taken, look for a free one nearby. */
-  private nudgeToFreeSpot(player: PlayerState) {
+  private nudgeToFreeSpot(body: BodyState) {
     for (let r = 0; r < 200; r += 8) {
       for (let a = 0; a < 8; a++) {
-        const x = player.x + Math.cos((a * Math.PI) / 4) * r;
-        const y = player.y + Math.sin((a * Math.PI) / 4) * r;
+        const x = body.x + Math.cos((a * Math.PI) / 4) * r;
+        const y = body.y + Math.sin((a * Math.PI) / 4) * r;
         if (!isBlocked(x, y, PLAYER_RADIUS + 2)) {
-          player.x = x;
-          player.y = y;
+          body.x = x;
+          body.y = y;
           return;
         }
       }

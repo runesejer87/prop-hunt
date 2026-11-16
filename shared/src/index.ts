@@ -40,20 +40,15 @@ export const WRONG_HIT_PENALTY = 10;
 /** How far from the hunter a swing can land, in pixels. */
 export const ATTACK_RANGE = 64;
 export const ATTACK_COOLDOWN = 0.5;
-/** How far the hunter can see, in pixels. */
-export const VISION_RADIUS = 170;
+/** How far the hunter can see, in pixels. Fully dark at this distance. */
+export const VISION_RADIUS = 200;
 
+/** Public facts about a player. Every client receives these for everyone. */
 export const PlayerState = schema(
   {
     id: t.string(),
     name: t.string(),
     role: t.string(),
-    x: t.number(),
-    y: t.number(),
-    /** Id of the prop this player is disguised as, or "" when not disguised. */
-    disguise: t.string(),
-    /** Disguised and standing still long enough: a perfect copy that does not wobble. */
-    settled: t.boolean(),
     /** False once the hunter has found you (you become a ghost). */
     alive: t.boolean(),
     /** Hunter health. Props ignore this. */
@@ -63,9 +58,28 @@ export const PlayerState = schema(
 );
 export type PlayerState = SchemaType<typeof PlayerState>;
 
+/**
+ * Where a player is and what they look like. The server only sends a body to a
+ * client that is allowed to see it (the hunter only gets bodies in line of sight).
+ */
+export const BodyState = schema(
+  {
+    x: t.number(),
+    y: t.number(),
+    /** Id of the prop this player is disguised as, or "" when not disguised. */
+    disguise: t.string(),
+    /** Disguised and standing still long enough: a perfect copy that does not wobble. */
+    settled: t.boolean(),
+  },
+  "BodyState",
+);
+export type BodyState = SchemaType<typeof BodyState>;
+
 export const GameState = schema(
   {
     players: t.map(PlayerState),
+    /** Filtered per client (see PropHuntRoom): you only get the bodies you may see. */
+    bodies: t.map(BodyState).view(),
     phase: t.string(),
     /** Seconds left in the current phase (whole seconds). */
     timeLeft: t.number(),
