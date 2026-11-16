@@ -1,5 +1,5 @@
 import { TILE, isWallTile } from "./map.ts";
-import { PLACED_PROPS, PROP_TYPES } from "./props.ts";
+import { PLACED_PROPS, PROP_TYPES, footprint } from "./props.ts";
 
 export interface Point {
   x: number;
@@ -25,8 +25,8 @@ interface Segment {
 
 /** Large furniture blocks sight; small objects (the ones you can copy) do not. */
 const BIG_PROPS = PLACED_PROPS.filter((p) => !PROP_TYPES[p.type]!.disguisable).map((p) => {
-  const pt = PROP_TYPES[p.type]!;
-  return { x: p.x - pt.w / 2, y: p.y - pt.h / 2, w: pt.w, h: pt.h };
+  const { w, h } = footprint(p.type, p.rot);
+  return { x: p.x - w / 2, y: p.y - h / 2, w, h };
 });
 
 const OUT = 1.5; // how far outside a face a sample point sits, in pixels

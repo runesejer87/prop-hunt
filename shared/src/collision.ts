@@ -1,5 +1,5 @@
 import { TILE, isWallTile } from "./map.ts";
-import { PLACED_PROPS, PROP_TYPES } from "./props.ts";
+import { PLACED_PROPS, footprint } from "./props.ts";
 
 /** Does a square of half-size `r`, centred at (x, y) pixels, touch a wall or a prop? */
 export function isBlocked(x: number, y: number, r: number): boolean {
@@ -10,8 +10,9 @@ export function isBlocked(x: number, y: number, r: number): boolean {
   for (let j = r0; j <= r1; j++) for (let i = c0; i <= c1; i++) if (isWallTile(i, j)) return true;
 
   for (const p of PLACED_PROPS) {
-    const pt = PROP_TYPES[p.type]!;
-    if (Math.abs(x - p.x) < pt.w / 2 + r && Math.abs(y - p.y) < pt.h / 2 + r) return true;
+    if (p.stacked) continue; // sits on something that already blocks
+    const { w, h } = footprint(p.type, p.rot);
+    if (Math.abs(x - p.x) < w / 2 + r && Math.abs(y - p.y) < h / 2 + r) return true;
   }
   return false;
 }

@@ -17,7 +17,23 @@ export const MAX_PLAYERS = 4;
 export const TICK_RATE = 30;
 
 /** Movement speed in pixels per second. */
-export const PLAYER_SPEED = 180;
+export const PROP_SPEED = 170;
+/** The hunter is faster than props, so running away does not work for long. */
+export const HUNTER_SPEED = 215;
+/** A disguised prop that moves can only shuffle along. Hiding beats running. */
+export const DISGUISED_SPEED = 55;
+export const PLAYER_SPEED = PROP_SPEED;
+
+/** How fast a player moves, given their role and whether they are disguised. */
+export function moveSpeed(role: string, disguised: boolean): number {
+  if (role === "hunter") return HUNTER_SPEED;
+  return disguised ? DISGUISED_SPEED : PROP_SPEED;
+}
+
+/** A prop that keeps moving gives away roughly where it is every few seconds. */
+export const PING_INTERVAL = 2.5;
+/** How far (pixels) the revealed spot can be from the prop's real position. */
+export const PING_JITTER = 50;
 export const PLAYER_RADIUS = 14;
 
 /** "spectator" = joined mid-round, watches until the next round. */
@@ -68,6 +84,8 @@ export const BodyState = schema(
     y: t.number(),
     /** Id of the prop this player is disguised as, or "" when not disguised. */
     disguise: t.string(),
+    /** Quarter turns of the disguise (0-3), copied from the object and changeable with R. */
+    rot: t.number(),
     /** Disguised and standing still long enough: a perfect copy that does not wobble. */
     settled: t.boolean(),
   },
@@ -102,6 +120,8 @@ export const MSG_INPUT = "input";
 export const MSG_DISGUISE = "disguise";
 /** Go back to normal. */
 export const MSG_UNDISGUISE = "undisguise";
+/** Turn your disguise a quarter turn, to match how nearby objects face. */
+export const MSG_ROTATE = "rotate";
 
 /** Hunter swings at a point in the world: { x, y }. */
 export const MSG_ATTACK = "attack";
@@ -117,3 +137,6 @@ export interface SwingEvent {
   /** What it landed on. */
   result: "player" | "prop" | "nothing";
 }
+
+/** Server tells the hunter roughly where a moving prop is: { x, y }. */
+export const MSG_PING = "ping";

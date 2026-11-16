@@ -1,17 +1,17 @@
 import Phaser from "phaser";
-import { Client, Callbacks, type Room } from "@colyseus/sdk";
+import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { Hud } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
 import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, charKey } from "./art.ts";
 import {
-  ROOM_NAME,
-  SERVER_PORT,
   MSG_INPUT,
   MSG_DISGUISE,
   MSG_UNDISGUISE,
+  MSG_ROTATE,
   MSG_ATTACK,
   MSG_SWING,
+  MSG_PING,
   type SwingEvent,
   ATTACK_RANGE,
   VISION_RADIUS,
@@ -22,8 +22,8 @@ import {
   WORLD_HEIGHT,
   moveWithCollision,
   PLAYER_RADIUS,
-  PLAYER_SPEED,
-  GameState,
+  moveSpeed,
+  type GameState,
   type PlayerState,
   type BodyState,
 } from "@prop-hunt/shared";
@@ -47,6 +47,7 @@ export class GameScene extends Phaser.Scene {
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
+  private keyR!: Phaser.Input.Keyboard.Key;
   private sfx = new Sound();
   private chars = new Map<string, Phaser.GameObjects.Image>();
   private skinShadows = new Map<string, Phaser.GameObjects.Image>();
@@ -57,8 +58,15 @@ export class GameScene extends Phaser.Scene {
   private prevTime = -1;
   private prevSettled = false;
 
+  private initialRoom!: Room<any, GameState>;
+
   constructor() {
     super("GameScene");
+  }
+
+  /** The room is joined before the scene starts (see main.ts and gate.ts). */
+  init(data: { room: Room<any, GameState> }) {
+    this.initialRoom = data.room;
   }
 
   create() {
@@ -73,6 +81,7 @@ export class GameScene extends Phaser.Scene {
     this.keyE = this.input.keyboard!.addKey("E");
     this.keyQ = this.input.keyboard!.addKey("Q");
     this.keyM = this.input.keyboard!.addKey("M");
+    this.keyR = this.input.keyboard!.addKey("R");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
 
     // Browsers only allow sound after a click or key press.
@@ -86,7 +95,7 @@ export class GameScene extends Phaser.Scene {
     // Props can see exactly what the hunter can see (a faint red glow on the floor).
     this.hunterView = this.add.graphics().setDepth(3);
     this.input.on("pointerdown", () => this.swing());
-    void this.connect();
+    this.attach(this.initialRoom);
   }
 
   /** How loud and how far left/right a sound at (x, y) is for me. */
@@ -123,53 +132,56 @@ export class GameScene extends Phaser.Scene {
     this.skinReady.add(id);
 
     if (!pt) return;
-    this.skinShadows.set(id, this.add.image(dot.x + 3, dot.y + 4, `shadow_${pt.id}`).setAlpha(0.3).setDepth(4.5));
-    this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5));
+    const turn = ((this.room?.state.bodies.get(id)?.rot ?? 0) * Math.PI) / 2;
+    this.skinShadows.set(id, this.add.image(dot.x + 3, dot.y + 4, `shadow_${pt.id}`).setAlpha(0.3).setDepth(4.5).setRotation(turn));
+    this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5).setRotation(turn));
     if (isMe) {
       // A thin green ring so you can still find yourself among the lookalikes.
       this.selfRing = this.add.circle(dot.x, dot.y, Math.max(pt.w, pt.h) / 2 + 5).setStrokeStyle(2, 0x4ade80).setDepth(4);
     }
   }
 
-  private async connect() {
-    try {
-      // Hosted builds set VITE_SERVER_URL; local dev uses the server on port 2567.
-      const serverUrl = import.meta.env.VITE_SERVER_URL || `ws://${location.hostname}:${SERVER_PORT}`;
-      const client = new Client(serverUrl);
-      this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {}, GameState);
-      this.connected = true;
+  /** Listen to the room we joined. */
+  private attach(room: Room<any, GameState>) {
+    this.room = room;
+    this.connected = true;
 
-      const callbacks = Callbacks.get(this.room);
-      // Bodies are sent only when the server says we may see them (the hunter
-      // gets just the ones in line of sight), so they appear and disappear here.
-      callbacks.onAdd("bodies", (b: BodyState, id: string) => {
-        this.addBody(b, id);
-        callbacks.listen(b, "disguise", (typeId: string) => this.setSkin(id, typeId));
-      });
-      callbacks.onRemove("bodies", (_b: BodyState, id: string) => {
-        this.sprites.get(id)?.destroy();
-        this.sprites.delete(id);
-        this.skins.get(id)?.destroy();
-        this.skins.delete(id);
-        this.skinShadows.get(id)?.destroy();
-        this.skinShadows.delete(id);
-        this.chars.get(id)?.destroy();
-        this.chars.delete(id);
-        this.styleOf.delete(id);
-        this.skinReady.delete(id);
-        this.lastPos.delete(id);
-        this.stepAcc.delete(id);
-        if (id === this.room?.sessionId) this.selfRing?.destroy();
-      });
-      this.room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
-      this.room.onLeave(() => {
-        this.connected = false;
-      });
-    } catch (err) {
-      console.error(err);
-      this.hud.update({ connected: true, phase: "", timeLeft: 0, winner: "", role: "", alive: true, hp: 0, playerCount: 0, propsLeft: 0 });
-      this.add.text(12, 12, `Could not connect to server: ${(err as Error)?.message ?? err}`, { color: "#fff" }).setScrollFactor(0).setDepth(100);
-    }
+    const callbacks = Callbacks.get(room);
+    // Bodies are sent only when the server says we may see them (the hunter
+    // gets just the ones in line of sight), so they appear and disappear here.
+    callbacks.onAdd("bodies", (b: BodyState, id: string) => {
+      this.addBody(b, id);
+      callbacks.listen(b, "disguise", (typeId: string) => this.setSkin(id, typeId));
+    });
+    callbacks.onRemove("bodies", (_b: BodyState, id: string) => {
+      this.sprites.get(id)?.destroy();
+      this.sprites.delete(id);
+      this.skins.get(id)?.destroy();
+      this.skins.delete(id);
+      this.skinShadows.get(id)?.destroy();
+      this.skinShadows.delete(id);
+      this.chars.get(id)?.destroy();
+      this.chars.delete(id);
+      this.styleOf.delete(id);
+      this.skinReady.delete(id);
+      this.lastPos.delete(id);
+      this.stepAcc.delete(id);
+      if (id === room.sessionId) this.selfRing?.destroy();
+    });
+    room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
+    room.onMessage(MSG_PING, (p: { x: number; y: number }) => this.showPing(p));
+    room.onLeave(() => {
+      this.connected = false;
+    });
+  }
+
+  /** The hunter hears and sees roughly where a moving prop is. */
+  private showPing(p: { x: number; y: number }) {
+    const ring = this.add.circle(p.x, p.y, 6).setStrokeStyle(3, 0xfbbf24, 0.95).setDepth(55);
+    const dot = this.add.circle(p.x, p.y, 4, 0xfbbf24, 0.9).setDepth(55);
+    this.tweens.add({ targets: ring, radius: 54, alpha: 0, duration: 1700, onComplete: () => ring.destroy() });
+    this.tweens.add({ targets: dot, alpha: 0, duration: 1700, onComplete: () => dot.destroy() });
+    this.sfx.ping(this.audioFrom(p.x, p.y).pan);
   }
 
   private addBody(b: BodyState, id: string) {
@@ -352,6 +364,7 @@ export class GameScene extends Phaser.Scene {
 
     if (Phaser.Input.Keyboard.JustDown(this.keyE)) room.send(MSG_DISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
+    if (Phaser.Input.Keyboard.JustDown(this.keyR) && myBody.disguise) room.send(MSG_ROTATE);
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
@@ -372,7 +385,7 @@ export class GameScene extends Phaser.Scene {
       // so the game feels responsive even when the connection is slow.
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
-        const step = (PLAYER_SPEED * delta) / 1000;
+        const step = (moveSpeed(me.role, !!myBody.disguise) * delta) / 1000;
         const next = moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
         dot.setPosition(next.x, next.y);
       }
@@ -398,7 +411,8 @@ export class GameScene extends Phaser.Scene {
       const settled = state.bodies.get(id)?.settled ?? true;
       const sway = settled ? 0 : Math.sin(time / 70) * 0.16;
       const pulse = settled ? 1 : 1 + Math.sin(time / 55) * 0.07;
-      img.rotation = Phaser.Math.Linear(img.rotation, sway, 0.35);
+      const base = ((state.bodies.get(id)?.rot ?? 0) * Math.PI) / 2;
+      img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, base + sway, 0.4);
       img.setScale(Phaser.Math.Linear(img.scaleX, pulse, 0.35));
       this.skinShadows.get(id)?.setPosition(img.x + 3, img.y + 4).setRotation(img.rotation).setScale(img.scaleX);
     });

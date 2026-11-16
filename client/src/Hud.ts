@@ -90,17 +90,19 @@ export class Hud {
       case "lobby":
         title = info.playerCount < MIN_PLAYERS ? "Waiting for another player…" : `Round starts in ${info.timeLeft}`;
         sub = "Open this page in a second tab or send the link to a friend (2–4 players)";
-        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)   M: sound";
+        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   M: sound";
         break;
       case "hide":
         title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
         sub = info.role === "spectator" ? "Spectating until the next round" : isHunter ? "You can't see or move yet" : "Walk to a small object and press E to become it";
-        hint = isHunter ? "Click or Space: swing at the mouse   M: sound" : "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)   M: sound";
+        hint = isHunter ? "Click or Space: swing at the mouse   M: sound" : "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   M: sound";
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
         sub = `${mmss}   ·   Props left: ${info.propsLeft}`;
-        hint = isHunter ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)   M: sound" : "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)   M: sound";
+        hint = isHunter
+          ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)   Yellow rings: something is moving nearby   M: sound"
+          : "Don't run! The hunter is faster, and moving props give themselves away. Hide: E / Q / R, hold still.   M: sound";
         break;
       case "end":
         title = "Round over";

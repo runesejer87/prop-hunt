@@ -179,19 +179,27 @@ export function drawWorld(scene: Phaser.Scene) {
     }
   }
 
-  // Rugs in the cosy rooms.
-  for (const room of ROOMS) {
-    if (!["Living Room", "Bedroom", "Library", "Study"].includes(room.name)) continue;
-    const w = room.w * TILE * 0.5;
-    const h = room.h * TILE * 0.5;
-    const x = (room.x + room.w / 2) * TILE - w / 2;
-    const y = (room.y + room.h / 2) * TILE - h / 2 + 8;
-    const c = mix(room.color, 0xb04a4a, 0.55);
-    g.fillStyle(0x000000, 0.18).fillRoundedRect(x + 3, y + 4, w, h, 10);
-    g.fillStyle(dark(c, 0.15)).fillRoundedRect(x, y, w, h, 10);
-    g.fillStyle(c).fillRoundedRect(x + 6, y + 6, w - 12, h - 12, 7);
-    g.lineStyle(2, light(c, 0.35), 0.8).strokeRoundedRect(x + 12, y + 12, w - 24, h - 24, 5);
-    g.fillStyle(light(c, 0.2), 0.5).fillRoundedRect(x + 22, y + 22, w - 44, h - 44, 4);
+  // Rugs and mats, each under a furniture group.
+  const RUGS: { x: number; y: number; w: number; h: number; color: number }[] = [
+    { x: 768, y: 164, w: 300, h: 176, color: 0x8a4a3a }, // living room, under the sofa and coffee table
+    { x: 1280, y: 206, w: 236, h: 150, color: 0x5a6e92 }, // bedroom, beside the bed
+    { x: 768, y: 852, w: 270, h: 140, color: 0x7a3a4a }, // library reading corner
+    { x: 1360, y: 424, w: 140, h: 84, color: 0x6a5a8a }, // study, under the desk chair
+    { x: 768, y: 496, w: 660, h: 64, color: 0x8a3a3a }, // hallway runner
+    { x: 290, y: 190, w: 160, h: 104, color: 0xb0a070 }, // kitchen mat under the table
+    { x: 110, y: 572, w: 84, h: 30, color: 0x6a9ab8 }, // bath mat
+  ];
+  for (const rug of RUGS) {
+    const x = rug.x - rug.w / 2;
+    const y = rug.y - rug.h / 2;
+    const c = rug.color;
+    g.fillStyle(0x000000, 0.18).fillRoundedRect(x + 3, y + 4, rug.w, rug.h, 8);
+    g.fillStyle(dark(c, 0.18)).fillRoundedRect(x, y, rug.w, rug.h, 8);
+    g.fillStyle(c).fillRoundedRect(x + 5, y + 5, rug.w - 10, rug.h - 10, 6);
+    if (rug.w > 100 && rug.h > 60) {
+      g.lineStyle(2, light(c, 0.35), 0.8).strokeRoundedRect(x + 11, y + 11, rug.w - 22, rug.h - 22, 4);
+      g.fillStyle(light(c, 0.18), 0.45).fillRoundedRect(x + 20, y + 20, rug.w - 40, rug.h - 40, 3);
+    }
   }
 
   // Soft shadows on the floor next to walls (light comes from the top left).
@@ -234,17 +242,25 @@ export function drawWorld(scene: Phaser.Scene) {
     }
   }
 
+  // Room names, written on the floor where nothing stands.
+  const LABELS: Record<string, [number, number]> = {
+    Kitchen: [250, 300],
+    "Living Room": [800, 298],
+    Bedroom: [1190, 262],
+    Bathroom: [180, 470],
+    Hallway: [768, 440],
+    Study: [1370, 520],
+    Garage: [320, 880],
+    Library: [768, 936],
+    Storage: [1410, 860],
+  };
   for (const room of ROOMS) {
+    const [lx, ly] = LABELS[room.name] ?? [(room.x + room.w / 2) * TILE, (room.y + 1) * TILE];
     scene.add
-      .text((room.x + room.w / 2) * TILE, (room.y + 0.55) * TILE, room.name.toUpperCase(), {
-        fontFamily: "sans-serif",
-        fontSize: "14px",
-        fontStyle: "bold",
-        color: "#ffffff",
-      })
-      .setOrigin(0.5, 0)
-      .setAlpha(0.28)
-      .setDepth(1.2);
+      .text(lx, ly, room.name.toUpperCase(), { fontFamily: "sans-serif", fontSize: "14px", fontStyle: "bold", color: "#ffffff" })
+      .setOrigin(0.5)
+      .setAlpha(0.3)
+      .setDepth(0.9);
   }
 }
 
@@ -470,6 +486,71 @@ function paintProp(g: G, pt: PropType) {
       g.fillStyle(light(c, 0.2), 0.7).fillCircle(w * 0.42, h * 0.4, w * 0.18);
       break;
     }
+    case "nightstand": {
+      body(3);
+      g.lineStyle(1, a, 0.9).lineBetween(4, h / 2, w - 4, h / 2);
+      g.fillStyle(0xd9c27a).fillCircle(w / 2, h * 0.3, 1.8).fillCircle(w / 2, h * 0.75, 1.8);
+      break;
+    }
+    case "wardrobe": {
+      body(3);
+      g.lineStyle(1, a, 0.9).lineBetween(w / 2, 4, w / 2, h - 4).strokeRect(5, 5, w / 2 - 7, h - 10).strokeRect(w / 2 + 2, 5, w / 2 - 7, h - 10);
+      g.fillStyle(0xd9c27a).fillCircle(w / 2 - 4, h / 2, 1.8).fillCircle(w / 2 + 4, h / 2, 1.8);
+      break;
+    }
+    case "shower": {
+      g.fillStyle(a).fillRoundedRect(0, 0, w, h, 3);
+      g.fillStyle(c).fillRoundedRect(2, 2, w - 4, h - 4, 2);
+      g.lineStyle(1, 0xffffff, 0.6);
+      for (let k = 8; k < w; k += 8) g.lineBetween(k, 2, k, h - 2);
+      g.fillStyle(0x6b7380).fillCircle(w / 2, h / 2, 3);
+      g.fillStyle(0xc9ced6).fillCircle(w * 0.25, h * 0.25, 5);
+      g.lineStyle(2, 0x9fb3c0).strokeRect(1, 1, w - 2, h - 2);
+      break;
+    }
+    case "basket": {
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(c).fillCircle(w / 2, h / 2, w / 2 - 2);
+      g.lineStyle(1, a, 0.7).strokeCircle(w / 2, h / 2, w * 0.36);
+      g.fillStyle(0xe8ecf4).fillEllipse(w * 0.45, h * 0.45, 12, 9);
+      g.fillStyle(0x6b9bd2).fillEllipse(w * 0.58, h * 0.58, 9, 8);
+      break;
+    }
+    case "toolbox": {
+      body(3);
+      g.fillStyle(0x9aa0aa).fillRoundedRect(w / 2 - 7, 3, 14, 4, 2);
+      g.fillStyle(0xd9d9d9).fillRect(5, h / 2 - 1, 4, 3).fillRect(w - 9, h / 2 - 1, 4, 3);
+      g.lineStyle(1, a, 0.9).lineBetween(3, h / 2, w - 3, h / 2);
+      break;
+    }
+    case "tire": {
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(c).fillCircle(w / 2, h / 2, w / 2 - 2);
+      g.fillStyle(0x6b7078).fillCircle(w / 2, h / 2, w * 0.24);
+      g.fillStyle(0x9aa0aa).fillCircle(w / 2, h / 2, w * 0.1);
+      break;
+    }
+    case "bucket": {
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(c).fillCircle(w / 2, h / 2, w / 2 - 2);
+      g.fillStyle(dark(c, 0.35)).fillCircle(w / 2, h / 2, w * 0.32);
+      g.lineStyle(1.5, 0xc9ced6).lineBetween(2, h / 2, w - 2, h / 2);
+      break;
+    }
+    case "cabinet": {
+      body(2);
+      g.lineStyle(1, a, 0.9).lineBetween(3, h / 2, w - 3, h / 2);
+      g.fillStyle(0x4a525c).fillRect(w / 2 - 4, h * 0.25, 8, 2).fillRect(w / 2 - 4, h * 0.75, 8, 2);
+      break;
+    }
+    case "umbrella": {
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(0x2c3036).fillCircle(w / 2, h / 2, w * 0.36);
+      g.fillStyle(0xd94a4a).fillCircle(w * 0.4, h * 0.45, 2.2);
+      g.fillStyle(0x4a8ad9).fillCircle(w * 0.6, h * 0.5, 2.2);
+      g.fillStyle(0xe0c64a).fillCircle(w * 0.5, h * 0.62, 2);
+      break;
+    }
     case "chair":
     case "armchair": {
       body(pt.id === "chair" ? 4 : 7);
@@ -505,8 +586,9 @@ export function makePropTextures(scene: Phaser.Scene) {
 /** Furniture and objects placed around the rooms, each with a soft shadow. */
 export function placeProps(scene: Phaser.Scene) {
   for (const p of PLACED_PROPS) {
-    scene.add.image(p.x + 3, p.y + 4, `shadow_${p.type}`).setAlpha(0.3).setDepth(1.5);
-    scene.add.image(p.x, p.y, `prop_${p.type}`).setDepth(2);
+    const turn = (p.rot * Math.PI) / 2;
+    if (!p.stacked) scene.add.image(p.x + 3, p.y + 4, `shadow_${p.type}`).setAlpha(0.3).setDepth(1.5).setRotation(turn);
+    scene.add.image(p.x, p.y, `prop_${p.type}`).setDepth(p.stacked ? 2.2 : 2).setRotation(turn);
   }
 }
 

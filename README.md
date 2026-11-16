@@ -10,6 +10,12 @@ One hunter searches the rooms; the others hide by disguising as objects.
 - **Vite** – client dev server and build
 - `shared/` – constants and synced state used by both sides
 
+## Password
+Set the `GAME_PASSWORD` environment variable on the **server** and players must enter it on a join screen
+(it is remembered for the browser tab). If it is not set, anyone can join (handy for local development).
+- Local: `GAME_PASSWORD=yourpassword npm run dev`
+- Vercel: project `prop-hunt-server` > Settings > Environment Variables, then redeploy.
+
 ## Run it
 ```
 npm install
@@ -31,9 +37,16 @@ The server runs on port 2567.
 - Anti-cheat: the server only sends the hunter the props they can currently see (in range and in line of sight). Hidden props' positions never reach the hunter's browser. Click or Space swings at the mouse.
   Hitting a hiding player finds them; hitting anything else costs 10 health (starts at 100).
 - Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
-- Props: **E** to become a nearby small object, **Q** to change back. Found props become ghosts.
+- Running does not work: the hunter is faster than props, a disguised prop that moves only shuffles slowly, and a prop that keeps
+  moving shows up as a yellow ping near its position for the hunter every few seconds. Hiding (and holding still) is the way to win.
+- Props: **E** to become a nearby small object (it copies which way that object faces), **R** to turn it, **Q** to change back. Found props become ghosts.
 - A disguised prop that moves **wobbles** (a tell). Hold still for 1 second and it settles into a perfect copy.
 - Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
+
+## Rooms
+Each room has a job and is furnished by hand in `shared/src/props.ts` (kitchen, living room, bedroom, bathroom, hallway,
+study, garage, library, storage). Everyday small things (chairs, plants, lamps, crates) appear in several rooms so
+hiders have lookalikes; themed things (toilet, tire, globe) belong to one room, so they look odd anywhere else.
 
 ## Art and sound
 Everything is made in code, so there are no image or sound files to manage:

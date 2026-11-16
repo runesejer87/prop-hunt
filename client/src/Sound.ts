@@ -180,6 +180,12 @@ export class Sound {
     this.tone(220, 0.3, { type: "sawtooth", slideTo: 110, gain: 0.1 * vol, delay: 0.08, pan });
   }
 
+  /** The hunter picks up a noise: a soft sonar blip with an echo. */
+  ping(pan = 0) {
+    this.tone(880, 0.32, { type: "sine", slideTo: 700, gain: 0.16, pan });
+    this.tone(880, 0.32, { type: "sine", slideTo: 700, gain: 0.07, delay: 0.2, pan });
+  }
+
   /** A countdown beep. `last` makes it higher and longer. */
   tick(last = false) {
     this.tone(last ? 880 : 520, last ? 0.28 : 0.1, { type: "square", gain: 0.1 });
