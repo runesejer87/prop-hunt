@@ -13,6 +13,7 @@ import {
   type SwingEvent,
   ATTACK_RANGE,
   VISION_RADIUS,
+  Sight,
   PROP_TYPES,
   PLACED_PROPS,
   nearestDisguisableProp,
@@ -42,7 +43,7 @@ export class GameScene extends Phaser.Scene {
   private connected = false;
   private styleOf = new Map<string, string>();
   private reticle!: Phaser.GameObjects.Graphics;
-  private hunterRing!: Phaser.GameObjects.Arc;
+  private hunterView!: Phaser.GameObjects.Graphics;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private skins = new Map<string, Phaser.GameObjects.Image>();
   private selfRing?: Phaser.GameObjects.Arc;
@@ -68,8 +69,8 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.fog = new Fog(this, WORLD_WIDTH, WORLD_HEIGHT);
     this.reticle = this.add.graphics().setDepth(60);
-    // Props can see roughly what the hunter can see.
-    this.hunterRing = this.add.circle(0, 0, VISION_RADIUS).setStrokeStyle(2, 0xef4444, 0.5).setDepth(3).setVisible(false);
+    // Props can see exactly what the hunter can see (a faint red glow on the floor).
+    this.hunterView = this.add.graphics().setDepth(3);
     this.input.on("pointerdown", () => this.swing());
     void this.connect();
   }
@@ -374,7 +375,7 @@ export class GameScene extends Phaser.Scene {
       this.fog.hide();
     }
 
-    // Everyone else can see roughly where the hunter can see.
+    // Everyone else can see exactly where the hunter can see.
     let hunterDot: Phaser.GameObjects.Arc | undefined;
     let propsLeft = 0;
     let playerCount = 0;
@@ -383,9 +384,19 @@ export class GameScene extends Phaser.Scene {
       if (p.role === "hunter") hunterDot = this.sprites.get(id);
       if (p.role === "prop" && p.alive) propsLeft++;
     });
-    const showRing = !iAmHunter && !!hunterDot && (phase === "hide" || phase === "hunt");
-    this.hunterRing.setVisible(showRing);
-    if (showRing && hunterDot) this.hunterRing.setPosition(hunterDot.x, hunterDot.y);
+    this.hunterView.clear();
+    if (!iAmHunter && hunterDot && (phase === "hide" || phase === "hunt")) {
+      const hx = hunterDot.x;
+      const hy = hunterDot.y;
+      // Pull far corners in to the vision circle.
+      const pts = new Sight(hx, hy, VISION_RADIUS).polygon().map((q) => {
+        const d = Math.hypot(q.x - hx, q.y - hy);
+        const k = d > VISION_RADIUS ? VISION_RADIUS / d : 1;
+        return new Phaser.Math.Vector2(hx + (q.x - hx) * k, hy + (q.y - hy) * k);
+      });
+      this.hunterView.fillStyle(0xef4444, 0.16).fillPoints(pts, true);
+      this.hunterView.lineStyle(2, 0xef4444, 0.45).strokePoints(pts, true);
+    }
 
     // Prompt to copy a nearby object (props only).
     let prompt: string | null = null;

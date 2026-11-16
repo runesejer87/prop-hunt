@@ -3,6 +3,7 @@ import { schema, t, type SchemaType } from "@colyseus/schema";
 export * from "./map.ts";
 export * from "./props.ts";
 export * from "./collision.ts";
+export * from "./vision.ts";
 
 /** Name used when joining the game room. */
 export const ROOM_NAME = "prop_hunt";
