@@ -51,7 +51,7 @@ export class GameScene extends Phaser.Scene {
       this.room.onLeave(() => this.status.setText("Disconnected"));
     } catch (err) {
       console.error(err);
-      this.status.setText("Could not connect to server (is `npm run dev` running?)");
+      this.status.setText(`Could not connect to server: ${(err as Error)?.message ?? err}`);
     }
   }
 
