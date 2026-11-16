@@ -25,8 +25,9 @@ export const DISGUISED_SPEED = 55;
 export const PLAYER_SPEED = PROP_SPEED;
 
 /** How fast a player moves, given their role and whether they are disguised. */
-export function moveSpeed(role: string, disguised: boolean): number {
+export function moveSpeed(role: string, disguised: boolean, running = false): number {
   if (role === "hunter") return HUNTER_SPEED;
+  if (running) return CHASE_SPEED;
   return disguised ? DISGUISED_SPEED : PROP_SPEED;
 }
 
@@ -83,12 +84,29 @@ export const POINTS_FOUND_ALL_BONUS = 2;
 export const POINTS_SURVIVE = 3;
 export const MAX_NAME_LENGTH = 14;
 
+/**
+ * A found prop is not out yet: it is exposed and gets a short sprint, faster than the hunter.
+ * The hunter must touch it (or swing at it) in time. If it escapes, it carries on, but cannot disguise for a moment.
+ */
+export const CHASE_TIME = 3;
+export const CHASE_SPEED = 250;
+/** A found prop gets this long (seconds) to break away before the hunter can catch it by touching. */
+export const CHASE_HEAD_START = 0.45;
+/** After a chase ends (escaped), no disguising for this many seconds. */
+export const CHASE_LOCKOUT = 2;
+/** How close (pixels between centres) the hunter must get to catch a runner by touching. */
+export const CATCH_RADIUS = 32;
+export const POINTS_ESCAPE = 1;
+
 /** Hunter rules. */
 export const HUNTER_MAX_HP = 100;
 /** Health lost when the hunter hits something that is not a player. */
 export const WRONG_HIT_PENALTY = 10;
 /** How far from the hunter a swing can land, in pixels. */
 export const ATTACK_RANGE = 64;
+/** The hunter hits whatever is in front of them, up to this far, within this much of a cone (radians each side). */
+export const SWING_REACH = 62;
+export const SWING_CONE = 0.4;
 export const ATTACK_COOLDOWN = 0.5;
 /** How far the hunter can see, in pixels. Fully dark at this distance. */
 export const VISION_RADIUS = 200;
@@ -111,6 +129,8 @@ export const PlayerState = schema(
     cooldown: t.number(),
     /** Hunter only: how far through an inspection (0 to 100). 0 when not inspecting. */
     inspect: t.number(),
+    /** Seconds left of the sprint a found prop gets before it is caught or escapes. 0 when not being chased. */
+    chase: t.number(),
   },
   "PlayerState",
 );
@@ -182,8 +202,8 @@ export interface AttackMessage {
 export interface SwingEvent {
   x: number;
   y: number;
-  /** What it landed on. */
-  result: "player" | "prop" | "nothing";
+  /** What it landed on. "caught": a prop was found and is running. "escaped": the runner got away. */
+  result: "player" | "prop" | "nothing" | "caught" | "escaped";
 }
 
 /** Server tells the hunter roughly where something is. */
@@ -224,4 +244,19 @@ export interface InspectResult {
 export const MSG_ALERT = "alert";
 export interface AlertMessage {
   active: boolean;
+}
+
+/** A prop taunts the hunter with a silly sound (Space). It gives away roughly where you are. */
+export const MSG_TAUNT = "taunt";
+/** Server to everyone: someone taunted. */
+export const MSG_TAUNTED = "taunted";
+export const TAUNT_COOLDOWN = 5;
+export const TAUNT_SOUNDS = 5;
+/** The hunter is told a spot this close (pixels) to the taunter, not the exact place. */
+export const TAUNT_JITTER = 90;
+export interface TauntEvent {
+  x: number;
+  y: number;
+  /** Which silly sound: 0 to TAUNT_SOUNDS - 1. */
+  sound: number;
 }

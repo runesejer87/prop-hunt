@@ -210,6 +210,45 @@ export class Sound {
     this.tone(740, 0.12, { type: "square", gain: 0.1, delay: 0.13 });
   }
 
+  /**
+   * Five silly taunts: 0 fart, 1 yodel, 2 boing, 3 honk, 4 sad trombone.
+   * `vol` is 0 to 1 (distance), `pan` is -1 left to 1 right.
+   */
+  taunt(kind: number, vol = 1, pan = 0) {
+    const v = Math.max(0.15, vol);
+    switch (kind % 5) {
+      case 0: {
+        // A long, wobbly low raspberry with a puff of air.
+        for (let i = 0; i < 7; i++) this.tone(95 - i * 6 + (i % 2) * 14, 0.09, { type: "sawtooth", slideTo: 55, gain: 0.34 * v, delay: i * 0.06, pan });
+        this.noise(0.5, { filter: "lowpass", freq: 700, sweepTo: 150, gain: 0.3 * v, pan });
+        break;
+      }
+      case 1: {
+        // Yo-del-ay-hee-hoooo: notes that jump high and low.
+        [392, 784, 392, 880, 523, 1047, 659, 1175].forEach((f, i) => this.tone(f, 0.15, { type: "triangle", gain: 0.26 * v, delay: i * 0.12, pan, slideTo: f * (i % 2 ? 0.96 : 1.04) }));
+        this.tone(1175, 0.5, { type: "triangle", gain: 0.24 * v, delay: 0.98, pan, slideTo: 1240 });
+        break;
+      }
+      case 2: {
+        // Boing!
+        this.tone(180, 0.55, { type: "sine", slideTo: 620, gain: 0.34 * v, pan });
+        this.tone(620, 0.35, { type: "sine", slideTo: 160, gain: 0.26 * v, delay: 0.3, pan });
+        break;
+      }
+      case 3: {
+        // Honk honk!
+        this.tone(230, 0.18, { type: "square", gain: 0.2 * v, pan, slideTo: 215 });
+        this.tone(230, 0.3, { type: "square", gain: 0.2 * v, delay: 0.24, pan, slideTo: 200 });
+        break;
+      }
+      default: {
+        // Womp womp wooomp: the sad trombone.
+        [311, 294, 277].forEach((f, i) => this.tone(f, 0.28, { type: "sawtooth", gain: 0.22 * v, delay: i * 0.3, pan, slideTo: f * 0.99 }));
+        this.tone(262, 0.8, { type: "sawtooth", gain: 0.22 * v, delay: 0.9, pan, slideTo: 196 });
+      }
+    }
+  }
+
   /** A countdown beep. `last` makes it higher and longer. */
   tick(last = false) {
     this.tone(last ? 880 : 520, last ? 0.28 : 0.1, { type: "square", gain: 0.1 });

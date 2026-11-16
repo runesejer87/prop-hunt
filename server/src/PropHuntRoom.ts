@@ -28,6 +28,12 @@ import {
   moveSpeed,
   MSG_PING,
   MSG_ABILITY,
+  MSG_TAUNT,
+  MSG_TAUNTED,
+  TAUNT_COOLDOWN,
+  TAUNT_SOUNDS,
+  TAUNT_JITTER,
+  type TauntEvent,
   type PingEvent,
   MSG_INSPECT,
   MSG_INSPECT_RESULT,
@@ -63,7 +69,13 @@ import {
   MAX_NAME_LENGTH,
   HUNTER_MAX_HP,
   WRONG_HIT_PENALTY,
-  ATTACK_RANGE,
+  SWING_REACH,
+  SWING_CONE,
+  CHASE_TIME,
+  CHASE_HEAD_START,
+  CHASE_LOCKOUT,
+  CATCH_RADIUS,
+  POINTS_ESCAPE,
   ATTACK_COOLDOWN,
   SETTLE_TIME,
   type Phase,
@@ -105,6 +117,16 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     startY: number;
     left: number;
   };
+  /** The way each player last walked (a unit vector). The hunter swings and inspects this way. */
+  private facing = new Map<string, { x: number; y: number }>();
+  /** Props that were just found and are sprinting for their lives. */
+  private chasing = new Map<string, { left: number; grace: number }>();
+  /** Time (seconds, room clock) before which a prop that just escaped cannot disguise. */
+  private lockUntil = new Map<string, number>();
+  /** How many chases each prop has escaped this round. */
+  private escapes = new Map<string, number>();
+  /** Room-clock time before which a prop cannot taunt again. */
+  private tauntReadyAt = new Map<string, number>();
   /** Seconds into the hunt at which the next tightening sweep happens. */
   private nextSweepAt = 0;
 
@@ -120,6 +142,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const player = this.state.players.get(client.sessionId);
       const body = this.state.bodies.get(client.sessionId);
       if (!player || !body || player.role !== "prop" || !player.alive) return;
+      if (this.chasing.has(client.sessionId) || this.clock.currentTime / 1000 < (this.lockUntil.get(client.sessionId) ?? 0)) return;
       const prop = this.map.nearestDisguisableProp(body.x, body.y);
       if (prop && PROP_TYPES[prop.type]) {
         if (body.disguise !== prop.type || body.rot !== prop.rot) this.stillFor.set(client.sessionId, 0);
@@ -145,6 +168,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     [MSG_ATTACK]: (client: Client, msg: AttackMessage) => this.handleAttack(client.sessionId, msg),
     [MSG_ABILITY]: (client: Client) => this.useAbility(client),
     [MSG_INSPECT]: (client: Client, msg: InspectMessage) => this.handleInspect(client, msg),
+    [MSG_TAUNT]: (client: Client) => this.handleTaunt(client),
   };
 
   /**
@@ -211,6 +235,11 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.noise.delete(client.sessionId);
     this.hunts.delete(client.sessionId);
     this.cooldowns.delete(client.sessionId);
+    this.facing.delete(client.sessionId);
+    this.chasing.delete(client.sessionId);
+    this.lockUntil.delete(client.sessionId);
+    this.escapes.delete(client.sessionId);
+    this.tauntReadyAt.delete(client.sessionId);
   }
 
   // ------------------------------------------------------------ visibility
@@ -236,7 +265,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         let show = true;
         if (restricted && id !== client.sessionId) {
           const other = this.state.players.get(id);
-          show = !!sight && !!other && other.role === "prop" && other.alive && this.hunterCanSee(sight, myBody, body, view.has(body));
+          const running = this.chasing.has(id) && phase === "hunt";
+          show = running || (!!sight && !!other && other.role === "prop" && other.alive && this.hunterCanSee(sight, myBody, body, view.has(body)));
         }
         const shown = view.has(body);
         if (show && !shown) view.add(body);
@@ -311,6 +341,10 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     });
     this.moveInputs.clear();
     this.cancelInspect(false);
+    this.chasing.clear();
+    this.lockUntil.clear();
+    this.escapes.clear();
+    for (const p of all) p.chase = 0;
     this.state.alert = 0;
     for (const p of all) this.setCooldown(p.id, 0);
     this.state.winner = "";
@@ -333,6 +367,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       let gain = 0;
       if (p.role === "hunter") gain = found * POINTS_PER_FIND + (winner === "hunter" ? POINTS_FOUND_ALL_BONUS : 0);
       else if (p.role === "prop" && p.alive) gain = POINTS_SURVIVE;
+      if (p.role === "prop") gain += (this.escapes.get(p.id) ?? 0) * POINTS_ESCAPE;
       p.gain = gain;
       p.score += gain;
     }
@@ -386,6 +421,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
     this.tickCooldowns(dt);
     this.tickInspect(dt);
+    this.tickChase(dt);
     this.updateTightening();
     this.movePlayers(dt);
     this.syncViews();
@@ -401,17 +437,23 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   // --------------------------------------------------------------- hunter
 
-  /** The point a hunter is aiming at, limited to their reach. */
-  private aimPoint(hunterBody: BodyState, msg: { x?: unknown; y?: unknown }): { x: number; y: number } | undefined {
-    let ax = Number(msg?.x);
-    let ay = Number(msg?.y);
-    if (!Number.isFinite(ax) || !Number.isFinite(ay)) return undefined;
-    const dist = Math.hypot(ax - hunterBody.x, ay - hunterBody.y);
-    if (dist > ATTACK_RANGE) {
-      ax = hunterBody.x + ((ax - hunterBody.x) / dist) * ATTACK_RANGE;
-      ay = hunterBody.y + ((ay - hunterBody.y) / dist) * ATTACK_RANGE;
+  /**
+   * What is in front of the hunter, the way they last walked: the nearest thing within reach, looking a
+   * little to each side. Returns the thing and the spot where it was found.
+   */
+  private frontTarget(hunterId: string, hunterBody: BodyState) {
+    const f = this.facing.get(hunterId) ?? { x: 0, y: 1 };
+    const base = Math.atan2(f.y, f.x);
+    const offsets = [0, SWING_CONE / 2, -SWING_CONE / 2, SWING_CONE, -SWING_CONE];
+    for (const dist of [26, 42, SWING_REACH]) {
+      for (const off of offsets) {
+        const px = hunterBody.x + Math.cos(base + off) * dist;
+        const py = hunterBody.y + Math.sin(base + off) * dist;
+        const hit = this.findTargetAt(px, py);
+        if (hit) return { hit, x: px, y: py };
+      }
     }
-    return { x: ax, y: ay };
+    return { hit: undefined, x: hunterBody.x + Math.cos(base) * 42, y: hunterBody.y + Math.sin(base) * 42 };
   }
 
   /** What is at this point: a set piece (furniture) or a hiding player. The closest wins; players win ties. */
@@ -431,8 +473,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const body = this.state.bodies.get(pl.id);
       if (!body) continue;
       const fp = body.disguise ? footprint(body.disguise, body.rot) : undefined;
-      const hw = (fp ? fp.w : PLAYER_RADIUS * 2) / 2 + SLOP;
-      const hh = (fp ? fp.h : PLAYER_RADIUS * 2) / 2 + SLOP;
+      const slop = this.chasing.has(pl.id) ? SLOP + 8 : SLOP; // a runner is easier to hit
+      const hw = (fp ? fp.w : PLAYER_RADIUS * 2) / 2 + slop;
+      const hh = (fp ? fp.h : PLAYER_RADIUS * 2) / 2 + slop;
       if (Math.abs(ax - body.x) <= hw && Math.abs(ay - body.y) <= hh)
         consider({ kind: "player", d: Math.hypot(ax - body.x, ay - body.y) - 0.5, id: pl.id });
     }
@@ -444,6 +487,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const found = this.state.players.get(id);
     const body = this.state.bodies.get(id);
     if (!found || !body) return;
+    this.chasing.delete(id);
+    found.chase = 0;
     found.alive = false;
     this.clearDisguise(id, body);
   }
@@ -457,18 +502,68 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.attackReadyAt = now + ATTACK_COOLDOWN;
     this.cancelInspect(false);
 
-    const aim = this.aimPoint(hunterBody, msg);
-    if (!aim) return;
-    const hit = this.findTargetAt(aim.x, aim.y);
+    const { hit, x, y } = this.frontTarget(sessionId, hunterBody);
     let result: SwingEvent["result"] = "nothing";
     if (hit?.kind === "player" && hit.id) {
-      this.eliminate(hit.id);
-      result = "player";
+      // The first hit exposes a hiding prop; a second hit on a runner puts them out.
+      if (this.chasing.has(hit.id)) {
+        this.eliminate(hit.id);
+        result = "player";
+      } else {
+        this.startChase(hit.id, x, y);
+        return;
+      }
     } else if (hit?.kind === "prop") {
       hunter.hp = Math.max(0, hunter.hp - WRONG_HIT_PENALTY);
       result = "prop";
     }
-    this.broadcast(MSG_SWING, { x: aim.x, y: aim.y, result } satisfies SwingEvent);
+    this.broadcast(MSG_SWING, { x, y, result } satisfies SwingEvent);
+  }
+
+  /** A prop was found: it is exposed and sprints, and the hunter must touch it before time runs out. */
+  private startChase(id: string, x: number, y: number) {
+    const player = this.state.players.get(id);
+    const body = this.state.bodies.get(id);
+    if (!player || !body || !player.alive) return;
+    this.clearDisguise(id, body);
+    this.chasing.set(id, { left: CHASE_TIME, grace: CHASE_HEAD_START });
+    player.chase = CHASE_TIME;
+    this.clients.find((c) => c.sessionId === id)?.send(MSG_ALERT, { active: false } satisfies AlertMessage);
+    this.broadcast(MSG_SWING, { x, y, result: "caught" } satisfies SwingEvent);
+  }
+
+  private tickChase(dt: number) {
+    if (this.chasing.size === 0) return;
+    const hunterEntry = [...this.state.players.values()].find((p) => p.role === "hunter");
+    const hunterBody = hunterEntry ? this.state.bodies.get(hunterEntry.id) : undefined;
+    for (const [id, c] of [...this.chasing]) {
+      const player = this.state.players.get(id);
+      const body = this.state.bodies.get(id);
+      if (!player || !body || !player.alive || this.state.phase !== "hunt") {
+        this.chasing.delete(id);
+        if (player) player.chase = 0;
+        continue;
+      }
+      // Touched by the hunter: out (after the runner's short head start).
+      c.grace -= dt;
+      if (c.grace <= 0 && hunterBody && Math.hypot(body.x - hunterBody.x, body.y - hunterBody.y) <= CATCH_RADIUS) {
+        this.eliminate(id);
+        this.broadcast(MSG_SWING, { x: body.x, y: body.y, result: "player" } satisfies SwingEvent);
+        continue;
+      }
+      c.left -= dt;
+      if (c.left > 0) {
+        const shown = Math.ceil(c.left * 10) / 10;
+        if (player.chase !== shown) player.chase = shown;
+        continue;
+      }
+      // Time is up: escaped.
+      this.chasing.delete(id);
+      player.chase = 0;
+      this.lockUntil.set(id, this.clock.currentTime / 1000 + CHASE_LOCKOUT);
+      this.escapes.set(id, (this.escapes.get(id) ?? 0) + 1);
+      this.broadcast(MSG_SWING, { x: body.x, y: body.y, result: "escaped" } satisfies SwingEvent);
+    }
   }
 
   // -------------------------------------------------------------- inspect
@@ -488,9 +583,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     }
     if (this.state.phase !== "hunt" || this.inspecting) return;
 
-    const aim = this.aimPoint(hunterBody, msg);
-    if (!aim) return;
-    const hit = this.findTargetAt(aim.x, aim.y);
+    const front = this.frontTarget(client.sessionId, hunterBody);
+    const aim = { x: front.x, y: front.y };
+    const hit = front.hit;
     if (!hit) {
       client.send(MSG_INSPECT_RESULT, { x: aim.x, y: aim.y, result: "none" } satisfies InspectResult);
       return;
@@ -554,11 +649,33 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const hunterClient = this.clients.find((c) => c.sessionId === ins.hunterId);
     this.cancelInspect(false);
     if (ins.kind === "player" && ins.targetId) {
-      this.eliminate(ins.targetId);
-      this.broadcast(MSG_SWING, { x: ins.startX, y: ins.startY, result: "player" } satisfies SwingEvent);
+      this.startChase(ins.targetId, ins.startX, ins.startY);
       hunterClient?.send(MSG_INSPECT_RESULT, { x: ins.startX, y: ins.startY, result: "found" } satisfies InspectResult);
     } else {
       hunterClient?.send(MSG_INSPECT_RESULT, { x: ins.x, y: ins.y, result: "clear", propId: ins.propId } satisfies InspectResult);
+    }
+  }
+
+  // ----------------------------------------------------------------- taunt
+
+  /**
+   * Space as a prop: make a silly sound that everyone hears, from where you are. It is funny, but it
+   * gives you away: the hunter is told roughly (not exactly) where it came from.
+   */
+  private handleTaunt(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    const body = this.state.bodies.get(client.sessionId);
+    if (!player || !body || player.role !== "prop" || this.state.phase === "end") return;
+    const now = this.clock.currentTime / 1000;
+    if (now < (this.tauntReadyAt.get(client.sessionId) ?? 0)) return;
+    this.tauntReadyAt.set(client.sessionId, now + TAUNT_COOLDOWN);
+
+    const sound = Math.floor(Math.random() * TAUNT_SOUNDS);
+    const j = () => (Math.random() * 2 - 1) * TAUNT_JITTER;
+    for (const c of this.clients) {
+      const role = this.state.players.get(c.sessionId)?.role;
+      const fuzzy = role === "hunter" && c.sessionId !== client.sessionId;
+      c.send(MSG_TAUNTED, { x: body.x + (fuzzy ? j() : 0), y: body.y + (fuzzy ? j() : 0), sound } satisfies TauntEvent);
     }
   }
 
@@ -640,7 +757,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!input || !moving) return;
       // Diagonals are no faster; a half-pushed joystick is half speed.
       const len = Math.hypot(input.dx, input.dy);
-      const step = moveSpeed(player.role, !!body.disguise) * dt * Math.min(1, len);
+      const step = moveSpeed(player.role, !!body.disguise, this.chasing.has(id)) * dt * Math.min(1, len);
+      this.facing.set(id, { x: input.dx / len, y: input.dy / len });
       const next = this.map.moveWithCollision(body.x, body.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
       body.x = next.x;
       body.y = next.y;

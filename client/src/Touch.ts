@@ -5,6 +5,7 @@ export interface TouchActions {
   disguise(): void;
   undisguise(): void;
   rotate(): void;
+  taunt(): void;
   ability(): void;
   swing(): void;
   /** Hold to inspect: true when the finger goes down, false when it lifts. */
@@ -23,7 +24,7 @@ export function isTouchDevice(): boolean {
   }
 }
 
-type Key = "main" | "a" | "b" | "ability" | "scores" | "mute";
+type Key = "main" | "a" | "b" | "ability" | "taunt" | "scores" | "mute";
 
 interface Btn {
   color: number;
@@ -63,7 +64,7 @@ export class TouchControls {
     this.base = scene.add.circle(0, 0, STICK_RADIUS, 0xffffff, 0.1).setStrokeStyle(3, 0xffffff, 0.3).setScrollFactor(0).setDepth(d).setVisible(false);
     this.thumb = scene.add.circle(0, 0, 26, 0xffffff, 0.35).setStrokeStyle(2, 0xffffff, 0.6).setScrollFactor(0).setDepth(d + 1).setVisible(false);
 
-    const colors: Record<Key, number> = { main: 0x4ade80, a: 0x60a5fa, b: 0xf59e0b, ability: 0xa78bfa, scores: 0x94a3b8, mute: 0x94a3b8 };
+    const colors: Record<Key, number> = { main: 0x4ade80, a: 0x60a5fa, b: 0xf59e0b, ability: 0xa78bfa, taunt: 0xf472b6, scores: 0x94a3b8, mute: 0x94a3b8 };
     for (const key of Object.keys(colors) as Key[]) {
       const color = colors[key];
       const circle = scene.add.circle(0, 0, 40, color, 0.28).setStrokeStyle(3, color, 0.85).setScrollFactor(0).setDepth(d).setVisible(false);
@@ -106,6 +107,9 @@ export class TouchControls {
         break;
       case "ability":
         this.actions.ability();
+        break;
+      case "taunt":
+        if (this.mode === "prop") this.actions.taunt();
         break;
       case "scores":
         this.scoresHeld = true;
@@ -226,13 +230,15 @@ export class TouchControls {
       this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.68, "Q", "Undo", true);
       this.place("b", cx - R * 0.3, cy - R * 2.15, R * 0.68, "R", "Turn", true);
       this.place("ability", cx - R * 1.7, cy - R * 1.7, R * 0.7, abilityLabel, abilitySub, abilityOn);
+      this.place("taunt", cx - R * 3.7, cy + R * 0.3, R * 0.62, "Taunt", "", true);
     } else if (mode === "hunter") {
       this.place("main", cx, cy, R, "Swing", "", true);
       this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.8, "Inspect", "hold", true);
       this.place("b", 0, 0, 0, "", "", false);
+      this.place("taunt", 0, 0, 0, "", "", false);
       this.place("ability", cx - R * 0.3, cy - R * 2.15, R * 0.72, abilityLabel, abilitySub, abilityOn);
     } else {
-      for (const key of ["main", "a", "b", "ability"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
+      for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
     this.place("scores", width - 30 * k, 92 * k, 17 * k, "≡", "", true);
     this.place("mute", width - 30 * k, 92 * k + 42 * k, 15 * k, "♪", "", true);

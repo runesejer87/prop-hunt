@@ -49,6 +49,11 @@ The server runs on port 2567.
 - Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
 - Running does not work: the hunter is faster than props, a disguised prop that moves only shuffles slowly, and a prop that keeps
   moving shows up as a yellow ping near its position for the hunter every few seconds. Hiding (and holding still) is the way to win.
+- The hunter steers like everyone else (no mouse aiming). **Space** (or click / the Swing button) hits whatever is directly in front,
+  the way they last walked. A hit on a hiding prop doesn't put it out: it is **found** and gets a 3-second sprint (faster than the hunter).
+  Touch it or hit it again before time runs out to catch it; if it escapes it stays in, earns a point, and can't disguise for 2 seconds.
+- Props can **taunt** with **Space** (a random fart, yodel, boing, honk or sad trombone, 5 s cooldown). It's funny but gives you away:
+  everyone hears it, and the hunter is told roughly where it came from.
 - **Inspect** (hunter, hold **E**): check the object under the mouse in 2 seconds, with no health cost. Ordinary objects get a tick;
   a hiding player is found. The player is warned and can slip away, which gives them away.
 - **The hunt tightens**: after 60 s and 120 s the hunter gets a rough circle for every prop every 20 s, then 10 s, and the radar recharges faster.

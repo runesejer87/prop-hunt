@@ -199,8 +199,8 @@ export class Hud {
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
         sub = `Round ${info.round ?? 0} · ${info.mapName ?? ""}   ·   ${mmss}   ·   Props left: ${info.propsLeft}${info.alert ? `   ·   Alert ${info.alert}` : ""}`;
         hint = isHunter
-          ? "Click / Space: swing   Hold E: inspect (safe)   F: radar   Rings: something moved   Tab: scores"
-          : "Don't run! Hide: E / Q / R, then hold still.   F: send the hunter a fake noise   Tab: scores   M: sound";
+          ? "WASD: steer   Space: swing at what's in front   Hold E: inspect (safe)   F: radar   Tab: scores"
+          : "Don't run! Hide: E / Q / R, then hold still.   F: fake noise   Space: taunt (silly, but it gives you away)   Tab: scores";
         break;
       case "end":
         title = "Round over";

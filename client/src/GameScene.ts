@@ -15,6 +15,9 @@ import {
   MSG_PING,
   MSG_ABILITY,
   MSG_INSPECT,
+  MSG_TAUNT,
+  MSG_TAUNTED,
+  type TauntEvent,
   MSG_INSPECT_RESULT,
   MSG_ALERT,
   type InspectResult,
@@ -145,6 +148,7 @@ export class GameScene extends Phaser.Scene {
         disguise: () => this.doDisguise(),
         undisguise: () => this.room?.send(MSG_UNDISGUISE),
         rotate: () => this.doRotate(),
+        taunt: () => this.doTaunt(),
         ability: () => this.doAbility(),
         swing: () => this.swing(),
         inspect: (on) => (on ? this.startInspect() : this.stopInspect()),
@@ -268,6 +272,7 @@ export class GameScene extends Phaser.Scene {
     room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
     room.onMessage(MSG_PING, (p: PingEvent) => this.showPing(p));
     room.onMessage(MSG_INSPECT_RESULT, (r: InspectResult) => this.showInspectResult(r));
+    room.onMessage(MSG_TAUNTED, (e: TauntEvent) => this.showTaunt(e));
     room.onMessage(MSG_ALERT, (a: AlertMessage) => {
       this.beingInspected = a.active;
       if (a.active) this.sfx.alarm();
@@ -393,29 +398,54 @@ export class GameScene extends Phaser.Scene {
     return !!this.room && !!me && me.role === "hunter" && this.room.state.phase === "hunt";
   }
 
-  /** Where the hunter is aiming: the mouse, or (on a touch screen) a little way ahead of where they face. */
+  /** The spot in front of the hunter, the way they last walked. Swings and inspections land here. */
   private aimWorld(): { x: number; y: number } {
     const id = this.room?.sessionId;
     const dot = id ? this.sprites.get(id) : undefined;
-    if (this.touch && this.touchUsed && dot && id) {
-      const a = this.chars.get(id)?.rotation ?? 0;
-      return { x: dot.x + Math.cos(a) * ATTACK_RANGE * 0.8, y: dot.y + Math.sin(a) * ATTACK_RANGE * 0.8 };
-    }
-    const ptr = this.input.activePointer;
-    return { x: ptr.worldX, y: ptr.worldY };
+    if (!dot || !id) return { x: 0, y: 0 };
+    const a = this.chars.get(id)?.rotation ?? Math.PI / 2;
+    return { x: dot.x + Math.cos(a) * 42, y: dot.y + Math.sin(a) * 42 };
   }
 
   private swing() {
     if (!this.canSwing()) return;
-    const aim = this.aimWorld();
     this.stopInspect();
-    this.room!.send(MSG_ATTACK, { x: aim.x, y: aim.y });
+    this.room!.send(MSG_ATTACK, {}); // the server works out what is in front of you
   }
 
   // ---- things you can do (keyboard keys and touch buttons both call these)
 
   private doDisguise() {
     if (this.me?.role === "prop") this.room?.send(MSG_DISGUISE);
+  }
+
+  /** Props: make a silly sound (Space). The server checks the cooldown. */
+  private doTaunt() {
+    if (this.me?.role === "prop") this.room?.send(MSG_TAUNT);
+  }
+
+  /** Someone taunted: play the sound (louder when close) and show the sound word. */
+  private showTaunt(e: TauntEvent) {
+    const myDot = this.room ? this.sprites.get(this.room.sessionId) : undefined;
+    const dist = myDot ? Math.hypot(e.x - myDot.x, e.y - myDot.y) : 0;
+    const vol = Math.max(0.2, 1 - dist / 1100);
+    const pan = myDot ? Math.max(-1, Math.min(1, (e.x - myDot.x) / 300)) : 0;
+    this.sfx.taunt(e.sound, vol, pan);
+    const words = ["pfffffft!", "Yo-del-ay-hee-hoo!", "BOING!", "HONK HONK!", "womp womp wooomp"];
+    const colors = [0xa6d65c, 0xffd166, 0x7ad7ff, 0xffa94d, 0xc4a1ff];
+    this.burst(e.x, e.y, colors[e.sound % 5]!, 14, 80, 900, 4.5, 0.7);
+    const bubble = this.add
+      .text(e.x, e.y - 26, words[e.sound % 5]!, {
+        fontFamily: "sans-serif",
+        fontSize: "17px",
+        fontStyle: "bold",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(80);
+    this.tweens.add({ targets: bubble, y: bubble.y - 34, alpha: 0, scale: 1.25, duration: 1700, ease: "Quad.easeOut", onComplete: () => bubble.destroy() });
   }
 
   private doRotate() {
@@ -440,7 +470,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.room || !me || me.role !== "hunter" || this.room.state.phase !== "hunt" || this.inspectHeld) return;
     this.inspectHeld = true;
     this.inspectAim = this.aimWorld();
-    this.room.send(MSG_INSPECT, { x: this.inspectAim.x, y: this.inspectAim.y, on: true });
+    this.room.send(MSG_INSPECT, { x: 0, y: 0, on: true });
   }
 
   private stopInspect() {
@@ -454,6 +484,8 @@ export class GameScene extends Phaser.Scene {
     const { vol, pan } = this.audioFrom(e.x, e.y);
     this.sfx.swing(Math.max(vol, 0.25), pan);
     if (e.result === "player") this.sfx.found(Math.max(vol, 0.4), pan);
+    else if (e.result === "caught") this.sfx.alarm();
+    else if (e.result === "escaped") this.sfx.unpoof(Math.max(vol, 0.5), pan);
     else if (e.result === "prop") this.sfx.wrongHit(Math.max(vol, 0.4), pan);
 
     // Find the hunter to draw the slash from.
@@ -469,7 +501,12 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: slash, alpha: 0, duration: 200, onComplete: () => slash.destroy() });
     }
 
-    if (e.result === "player") {
+    if (e.result === "caught") {
+      this.burst(e.x, e.y, 0xffd166, 14, 120, 600, 3.2, 0.95);
+      this.burst(e.x, e.y, 0xff7a6a, 8, 80, 500, 2.6, 0.9);
+    } else if (e.result === "escaped") {
+      this.burst(e.x, e.y, 0xcfd3dc, 10, 90, 500, 3, 0.7);
+    } else if (e.result === "player") {
       this.burst(e.x, e.y, 0x7cf5a0, 16, 120, 650, 3.4, 0.95);
       this.burst(e.x, e.y, 0xfff1a6, 8, 90, 550, 2.6, 0.95);
     } else if (e.result === "prop") {
@@ -478,16 +515,16 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.burst(e.x, e.y, 0xd0d0d8, 4, 40, 300, 2, 0.5);
     }
-    const color = e.result === "player" ? 0x4ade80 : e.result === "prop" ? 0xef4444 : 0xaaaaaa;
+    const color = e.result === "player" ? 0x4ade80 : e.result === "caught" ? 0xffd166 : e.result === "prop" ? 0xef4444 : 0xaaaaaa;
     const ring = this.add.circle(e.x, e.y, 8).setStrokeStyle(3, color).setDepth(70);
     this.tweens.add({ targets: ring, radius: 30, alpha: 0, duration: 300, onComplete: () => ring.destroy() });
     if (e.result === "nothing") return;
     if (e.result === "prop" && this.me?.role === "hunter") this.cameras.main.shake(130, 0.005);
     const label = this.add
-      .text(e.x, e.y - 20, e.result === "player" ? "FOUND!" : "Just an object", {
+      .text(e.x, e.y - 20, e.result === "player" ? "CAUGHT!" : e.result === "caught" ? "FOUND! Catch them!" : e.result === "escaped" ? "Escaped!" : "Just an object", {
         fontFamily: "sans-serif",
         fontSize: "16px",
-        color: e.result === "player" ? "#9dffa8" : "#ff8a8a",
+        color: e.result === "player" ? "#9dffa8" : e.result === "caught" ? "#ffd166" : e.result === "escaped" ? "#cfd3dc" : "#ff8a8a",
         stroke: "#000",
         strokeThickness: 3,
       })
@@ -545,11 +582,9 @@ export class GameScene extends Phaser.Scene {
       const tex = `${charKey(info.role, id)}_${pose}`;
       if (img.texture.key !== tex) img.setTexture(tex);
 
-      // The hunter faces the mouse; everyone else faces the way they walk.
-      if (id === myId && me.role === "hunter" && state.phase === "hunt") {
-        const ptr = this.input.activePointer;
-        img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(ptr.worldY - dot.y, ptr.worldX - dot.x), 0.3);
-      } else if (moved > 0.4) {
+      // Everyone faces the way they walk. The hunter swings and inspects that way.
+      void me;
+      if (moved > 0.4) {
         img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(dot.y - last.y, dot.x - last.x), 0.25);
       }
 
@@ -649,7 +684,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.doRotate();
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+      if (me.role === "hunter") this.swing();
+      else this.doTaunt();
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keyF)) this.doAbility();
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
@@ -671,7 +709,7 @@ export class GameScene extends Phaser.Scene {
       const len = Math.hypot(dx, dy);
       const moving = len > 0.05;
       if (moving) {
-        const step = (moveSpeed(me.role, !!myBody.disguise) * delta * Math.min(1, len)) / 1000;
+        const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0) * delta * Math.min(1, len)) / 1000;
         const next = this.map.moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
         dot.setPosition(next.x, next.y);
       }
@@ -717,12 +755,9 @@ export class GameScene extends Phaser.Scene {
       if (phase === "hide") this.fog.blind();
       else this.fog.see(myDot.x, myDot.y, this.map);
       if (phase === "hunt") {
-        const aim = this.me && me.inspect > 0 ? this.inspectAim : this.aimWorld();
-        const d = Math.hypot(aim.x - myDot.x, aim.y - myDot.y) || 1;
-        const k = Math.min(1, ATTACK_RANGE / d);
-        const ax = myDot.x + (aim.x - myDot.x) * k;
-        const ay = myDot.y + (aim.y - myDot.y) * k;
-        this.reticle.lineStyle(1, 0xffffff, 0.25).strokeCircle(myDot.x, myDot.y, ATTACK_RANGE);
+        const aim = me.inspect > 0 ? this.inspectAim : this.aimWorld();
+        const ax = aim.x;
+        const ay = aim.y;
         this.reticle.lineStyle(2, 0xffffff, 0.9).strokeCircle(ax, ay, 9).lineBetween(ax - 13, ay, ax + 13, ay).lineBetween(ax, ay - 13, ax, ay + 13);
         // Inspecting: a ring fills up around the thing being checked.
         if (me.inspect > 0) {
@@ -778,7 +813,15 @@ export class GameScene extends Phaser.Scene {
     }
     // A prop being inspected has a few seconds to slip away.
     if (this.beingInspected && (me.role !== "prop" || !me.alive || phase !== "hunt")) this.beingInspected = false;
-    if (this.beingInspected) {
+    let runnerLeft = 0;
+    state.players.forEach((p: PlayerState) => {
+      if (p.chase > 0) runnerLeft = Math.max(runnerLeft, p.chase);
+    });
+    if (me.chase > 0) {
+      this.hud.setWarning(`YOU'VE BEEN FOUND — RUN!  ${me.chase.toFixed(1)}s`, time);
+    } else if (iAmHunter && runnerLeft > 0 && phase === "hunt") {
+      this.hud.setWarning(`CATCH THE RUNNER — touch them!  ${runnerLeft.toFixed(1)}s`, time);
+    } else if (this.beingInspected) {
       this.hud.setWarning("THE HUNTER IS INSPECTING YOU — MOVE AWAY!", time);
       if (time - this.lastAlarmAt > 450) {
         this.lastAlarmAt = time;
