@@ -1,6 +1,6 @@
 import { defineServer } from "colyseus";
 import { SERVER_PORT } from "@prop-hunt/shared";
-import { rooms } from "./app.ts";
+import { rooms } from "./rooms.ts";
 
 const server = defineServer({ rooms });
 

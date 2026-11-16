@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { defineServer } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { rooms } from "./app.ts";
+import { rooms } from "./rooms.ts";
 
 const httpServer = createServer();
 const server = defineServer({

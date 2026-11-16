@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc --noEmit && esbuild src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vercel.mjs --external:uWebSockets.js --external:ioredis --external:@colyseus/uwebsockets-transport --external:@colyseus/redis-driver --external:@colyseus/redis-presence --external:@colyseus/monitor --external:@colyseus/playground --external:@colyseus/auth --external:better-sqlite3 --external:pg --external:mysql2 --external:mongodb --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
-    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/dev.ts",
+    "build": "tsc --noEmit && esbuild src/vercelServer.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vercel.mjs --external:uWebSockets.js --external:ioredis --external:@colyseus/uwebsockets-transport --external:@colyseus/redis-driver --external:@colyseus/redis-presence --external:@colyseus/monitor --external:@colyseus/playground --external:@colyseus/auth --external:better-sqlite3 --external:pg --external:mysql2 --external:mongodb --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
+    "start": "tsx src/dev.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,6 +17,5 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
-  },
-  "main": "dist/vercel.mjs"
+  }
 }
