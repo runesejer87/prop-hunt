@@ -10,7 +10,7 @@ const server = defineServer({
   rooms,
 });
 
-// Say whether the join password is set (never the password itself).
-console.log(`Password protection: ${process.env.GAME_PASSWORD ? "ON" : "OFF (anyone can join)"}`);
+// Say whether the join password is set (never the password itself). Also shows which region this runs in.
+console.log(`Password protection: ${process.env.GAME_PASSWORD ? "ON" : "OFF (anyone can join)"} | region: ${process.env.VERCEL_REGION ?? "unknown"}`);
 
 export default await server.serverless();
