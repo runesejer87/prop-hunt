@@ -50,10 +50,16 @@ The server runs on port 2567.
 - A disguised prop that moves **wobbles** (a tell). Hold still for 1 second and it settles into a perfect copy.
 - Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
 
-## Rooms
-Each room has a job and is furnished by hand in `shared/src/props.ts` (kitchen, living room, bedroom, bathroom, hallway,
-study, garage, library, storage). Everyday small things (chairs, plants, lamps, crates) appear in several rooms so
-hiders have lookalikes; themed things (toilet, tire, globe) belong to one room, so they look odd anywhere else.
+## Maps
+There are three maps and the server picks a different one each round: **The House** (9 rooms around a hallway),
+**The Office** (corridor, offices, boardroom, open plan, break room, server room) and **The Diner** (dining hall, bar,
+pool lounge, kitchen, cold storage, restrooms, back office). Each map is plain data in `shared/src/maps/`, furnished by hand:
+every room has a job, furniture sits against walls or around a focus (sofa faces the TV, chairs face the table), everyday
+small things (chairs, plants, lamps, crates) appear in several rooms so hiders have lookalikes, and themed things (toilet,
+server rack, pool table) belong to one room so they look odd anywhere else.
+
+To add a map: copy a file in `shared/src/maps/`, edit it, add it to `MAP_DEFS` in `shared/src/gamemap.ts`.
+It is checked by hand-checking that nothing overlaps, doorways stay clear and every part of every room is reachable.
 
 ## Art and sound
 Everything is made in code, so there are no image or sound files to manage:

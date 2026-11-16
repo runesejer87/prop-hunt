@@ -516,6 +516,104 @@ function paintProp(g: G, pt: PropType) {
       g.fillStyle(0xe0c64a).fillCircle(w * 0.5, h * 0.62, 2);
       break;
     }
+    case "printer": {
+      body(3);
+      g.fillStyle(0xf4f6fa).fillRect(5, 5, w - 10, h * 0.42);
+      g.fillStyle(0x4a525c).fillRect(w * 0.55, h * 0.6, w * 0.35, 3);
+      g.fillStyle(0x3fbf6e).fillCircle(w - 8, h - 8, 1.8);
+      break;
+    }
+    case "cooler": {
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(c).fillCircle(w / 2, h / 2, w / 2 - 2);
+      g.fillStyle(0xe8f4fb, 0.8).fillCircle(w / 2, h / 2, w * 0.3);
+      g.fillStyle(0xffffff, 0.7).fillCircle(w * 0.42, h * 0.4, 2);
+      break;
+    }
+    case "vending": {
+      body(3);
+      g.fillStyle(0x1b2030).fillRect(5, 4, w - 10, h * 0.55);
+      const cols = [0xf5c542, 0x4ac2f5, 0xe8566f, 0x6bd16b];
+      for (let k = 0; k < 4; k++) g.fillStyle(cols[k]!).fillRect(7 + k * 7, 8, 5, 8).fillRect(7 + k * 7, 19, 5, 8);
+      g.fillStyle(0x8a93a6).fillRect(w - 12, h - 10, 8, 5);
+      break;
+    }
+    case "partition":
+    case "divider": {
+      g.fillStyle(a).fillRoundedRect(0, 0, w, h, 2);
+      g.fillStyle(c).fillRoundedRect(1, 1, w - 2, h - 2, 2);
+      g.fillStyle(0xffffff, 0.15).fillRect(2, 2, w - 4, 2);
+      break;
+    }
+    case "server_rack": {
+      body(2);
+      for (let k = 0; k < 5; k++) {
+        g.fillStyle(0x0d0f14).fillRect(4, 4 + k * 8, w - 8, 6);
+        g.fillStyle(k % 2 ? 0x3fbf6e : 0x4ac2f5).fillRect(6, 6 + k * 8, 2, 2);
+        g.fillStyle(0xf5c542).fillRect(10, 6 + k * 8, 2, 2);
+      }
+      break;
+    }
+    case "reception_desk": {
+      body(5);
+      g.fillStyle(light(c, 0.12)).fillRoundedRect(4, 4, w - 8, h * 0.42, 3);
+      g.fillStyle(0x1b2030).fillRoundedRect(w * 0.15, 8, 22, 14, 2);
+      g.fillStyle(0x5aa0d8).fillRect(w * 0.15 + 2, 10, 18, 10);
+      g.fillStyle(0xf2f2f2).fillCircle(w * 0.75, 14, 4);
+      g.fillStyle(0xd96b4a).fillCircle(w * 0.75, 14, 2);
+      g.lineStyle(1, a, 0.6).lineBetween(4, h * 0.62, w - 4, h * 0.62);
+      break;
+    }
+    case "conference_table": {
+      g.fillStyle(a).fillRoundedRect(0, 0, w, h, 18);
+      g.fillStyle(c).fillRoundedRect(3, 3, w - 6, h - 6, 15);
+      g.lineStyle(1, a, 0.5);
+      for (let y = 10; y < h - 4; y += 8) g.lineBetween(10, y, w - 10, y);
+      g.fillStyle(0x1b2030).fillRoundedRect(w / 2 - 12, h / 2 - 6, 24, 12, 2);
+      g.fillStyle(0xf2f2f2).fillCircle(w * 0.25, h * 0.3, 4).fillCircle(w * 0.75, h * 0.7, 4);
+      break;
+    }
+    case "whiteboard": {
+      g.fillStyle(a).fillRect(0, 0, w, h);
+      g.fillStyle(c).fillRect(1, 1, w - 2, h - 2);
+      g.lineStyle(1, 0x4a8ad9, 0.9).lineBetween(8, 4, 30, 6).lineBetween(36, 5, 60, 4);
+      g.lineStyle(1, 0xd94a4a, 0.9).lineBetween(14, 7, 40, 7);
+      break;
+    }
+    case "cafe_table": {
+      g.fillStyle(0x000000, 0.1).fillCircle(w / 2, h / 2 + 1, w / 2);
+      g.fillStyle(a).fillCircle(w / 2, h / 2, w / 2);
+      g.fillStyle(c).fillCircle(w / 2, h / 2, w / 2 - 2);
+      g.lineStyle(1.5, a, 0.7).strokeCircle(w / 2, h / 2, w * 0.3);
+      g.fillStyle(0xd9453a).fillCircle(w * 0.42, h * 0.42, 3);
+      g.fillStyle(0xf5c542).fillCircle(w * 0.6, h * 0.58, 2.5);
+      break;
+    }
+    case "jukebox": {
+      body(8);
+      g.fillStyle(0x2a1a1a).fillRoundedRect(5, 5, w - 10, h * 0.5, 6);
+      g.fillStyle(0xf5c542).fillCircle(w * 0.3, h * 0.35, 3).fillStyle(0x4ac2f5).fillCircle(w * 0.5, h * 0.35, 3).fillStyle(0x6bd16b).fillCircle(w * 0.7, h * 0.35, 3);
+      g.lineStyle(2, 0xf5c542, 0.9).strokeRoundedRect(3, 3, w - 6, h - 6, 7);
+      break;
+    }
+    case "booth": {
+      body(8);
+      g.fillStyle(dark(c, 0.25)).fillRoundedRect(3, 3, w - 6, h * 0.3, 5);
+      g.fillStyle(light(c, 0.1)).fillRoundedRect(5, h * 0.36, w - 10, h * 0.55, 4);
+      g.lineStyle(1, a, 0.7);
+      for (let x = 14; x < w - 8; x += 14) g.lineBetween(x, h * 0.4, x, h * 0.88);
+      break;
+    }
+    case "pool_table": {
+      g.fillStyle(0x000000, 0.12).fillRoundedRect(2, 3, w - 2, h - 2, 8);
+      g.fillStyle(a).fillRoundedRect(0, 0, w, h, 8);
+      g.fillStyle(c).fillRoundedRect(7, 7, w - 14, h - 14, 4);
+      g.fillStyle(0x15171d).fillCircle(7, 7, 4).fillCircle(w - 7, 7, 4).fillCircle(7, h - 7, 4).fillCircle(w - 7, h - 7, 4).fillCircle(w / 2, 6, 3.5).fillCircle(w / 2, h - 6, 3.5);
+      g.fillStyle(0xf2f2f2).fillCircle(w * 0.3, h / 2, 3);
+      const balls = [0xd94a4a, 0xf5c542, 0x4a8ad9, 0x2a2a2e, 0xe88a3a];
+      balls.forEach((bc, k) => g.fillStyle(bc).fillCircle(w * 0.66 + (k % 2) * 6, h / 2 + (k - 2) * 5, 3));
+      break;
+    }
     case "chair":
     case "armchair": {
       body(pt.id === "chair" ? 4 : 7);

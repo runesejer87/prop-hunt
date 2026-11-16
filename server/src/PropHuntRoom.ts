@@ -282,10 +282,10 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.setPhase("hide", HIDE_TIME);
   }
 
-  /** A different map each round (when there is more than one). */
+  /** A different map each round (the first round can be any of them). */
   private chooseNextMap() {
-    const others = MAP_IDS.filter((id) => id !== this.map.id);
-    const next = others.length > 0 ? others[Math.floor(Math.random() * others.length)]! : this.map.id;
+    const pool = this.state.round <= 1 ? [...MAP_IDS] : MAP_IDS.filter((id) => id !== this.map.id);
+    const next = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)]! : this.map.id;
     this.map = getMap(next);
     this.state.map = this.map.id;
   }
