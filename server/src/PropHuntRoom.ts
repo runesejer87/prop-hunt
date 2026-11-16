@@ -31,6 +31,7 @@ import {
   WRONG_HIT_PENALTY,
   ATTACK_RANGE,
   ATTACK_COOLDOWN,
+  SETTLE_TIME,
   type Phase,
 } from "@prop-hunt/shared";
 
@@ -45,6 +46,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   /** Seconds left (with decimals) in the current phase. */
   private clockLeft = 0;
   private attackReadyAt = 0;
+  /** Seconds each disguised prop has been standing still. */
+  private stillFor = new Map<string, number>();
 
   messages = {
     [MSG_INPUT]: (client: Client, msg: InputMessage) => {
@@ -57,11 +60,14 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const player = this.state.players.get(client.sessionId);
       if (!player || player.role !== "prop" || !player.alive) return;
       const prop = nearestDisguisableProp(player.x, player.y);
-      if (prop && PROP_TYPES[prop.type]) player.disguise = prop.type;
+      if (prop && PROP_TYPES[prop.type]) {
+        if (player.disguise !== prop.type) this.stillFor.set(client.sessionId, 0);
+        player.disguise = prop.type;
+      }
     },
     [MSG_UNDISGUISE]: (client: Client) => {
       const player = this.state.players.get(client.sessionId);
-      if (player) player.disguise = "";
+      if (player) this.clearDisguise(player);
     },
     [MSG_ATTACK]: (client: Client, msg: AttackMessage) => this.handleAttack(client.sessionId, msg),
   };
@@ -78,6 +84,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.id = client.sessionId;
     player.name = `Player ${this.clients.length}`;
     player.disguise = "";
+    player.settled = false;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
@@ -90,6 +97,13 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   onLeave(client: Client) {
     this.state.players.delete(client.sessionId);
     this.moveInputs.delete(client.sessionId);
+    this.stillFor.delete(client.sessionId);
+  }
+
+  private clearDisguise(player: PlayerState) {
+    player.disguise = "";
+    player.settled = false;
+    this.stillFor.delete(player.id);
   }
 
   // ---------------------------------------------------------------- rounds
@@ -110,7 +124,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     all.forEach((p, i) => {
       p.role = i === hunterIndex ? "hunter" : "prop";
       p.alive = true;
-      p.disguise = "";
+      this.clearDisguise(p);
       p.hp = HUNTER_MAX_HP;
       if (p.role === "hunter") {
         // The hunter starts in the middle of the hallway.
@@ -137,7 +151,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     for (const p of this.players()) {
       p.role = "prop";
       p.alive = true;
-      p.disguise = "";
+      this.clearDisguise(p);
       p.hp = HUNTER_MAX_HP;
       this.placeRandomly(p);
     }
@@ -230,7 +244,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     let result: SwingEvent["result"] = "nothing";
     if (hit?.kind === "player" && hit.player) {
       hit.player.alive = false;
-      hit.player.disguise = "";
+      this.clearDisguise(hit.player);
       result = "player";
     } else if (hit?.kind === "prop") {
       hunter.hp = Math.max(0, hunter.hp - WRONG_HIT_PENALTY);
@@ -246,7 +260,17 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.players.forEach((player, id) => {
       if (frozen && player.role === "hunter") return; // hunter waits while props hide
       const input = this.moveInputs.get(id);
-      if (!input || (input.dx === 0 && input.dy === 0)) return;
+      const moving = !!input && (input.dx !== 0 || input.dy !== 0);
+
+      // Props that stand still for a moment settle into a perfect copy.
+      if (player.disguise) {
+        const still = moving ? 0 : (this.stillFor.get(id) ?? 0) + dt;
+        this.stillFor.set(id, still);
+        const settled = still >= SETTLE_TIME;
+        if (player.settled !== settled) player.settled = settled;
+      }
+
+      if (!input || !moving) return;
       // Normalise so diagonal movement isn't faster.
       const len = Math.hypot(input.dx, input.dy);
       const step = PLAYER_SPEED * dt;

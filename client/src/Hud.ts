@@ -13,6 +13,7 @@ export class Hud {
   private hpFill: Phaser.GameObjects.Rectangle;
   private hpLabel: Phaser.GameObjects.Text;
   private prompt: Phaser.GameObjects.Text;
+  private note: Phaser.GameObjects.Text;
 
   constructor(private scene: Phaser.Scene) {
     const d = 100;
@@ -25,6 +26,7 @@ export class Hud {
     this.hpBack = scene.add.rectangle(0, 0, 200, 14, 0x000000, 0.6).setOrigin(1, 0).setScrollFactor(0).setDepth(d).setVisible(false);
     this.hpFill = scene.add.rectangle(0, 0, 200, 14, 0xef4444).setOrigin(1, 0).setScrollFactor(0).setDepth(d + 1).setVisible(false);
     this.hpLabel = text(13).setOrigin(1, 0).setVisible(false);
+    this.note = text(16).setOrigin(0.5, 1).setVisible(false);
     this.prompt = scene.add
       .text(0, 0, "", { fontFamily: FONT, fontSize: "18px", color: "#fff", backgroundColor: "#000000a0", padding: { x: 10, y: 6 } })
       .setOrigin(0.5, 1)
@@ -37,6 +39,13 @@ export class Hud {
     const { width, height } = this.scene.scale;
     if (text) this.prompt.setText(text).setPosition(width / 2, height - 24).setVisible(true);
     else this.prompt.setVisible(false);
+  }
+
+  /** Small status line above the prompt, e.g. whether you are a perfect copy yet. */
+  setNote(text: string | null, color = "#ffffff") {
+    const { width, height } = this.scene.scale;
+    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - 64).setVisible(true);
+    else this.note.setVisible(false);
   }
 
   update(info: {
@@ -72,17 +81,17 @@ export class Hud {
       case "lobby":
         title = info.playerCount < MIN_PLAYERS ? "Waiting for another player…" : `Round starts in ${info.timeLeft}`;
         sub = "Open this page in a second tab or send the link to a friend (2–4 players)";
-        hint = "WASD / arrows: move   E: become a nearby object   Q: change back";
+        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)";
         break;
       case "hide":
         title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
         sub = info.role === "spectator" ? "Spectating until the next round" : isHunter ? "You can't see or move yet" : "Walk to a small object and press E to become it";
-        hint = isHunter ? "Click or Space: swing at the mouse" : "WASD / arrows: move   E: become a nearby object   Q: change back";
+        hint = isHunter ? "Click or Space: swing at the mouse" : "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)";
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
         sub = `${mmss}   ·   Props left: ${info.propsLeft}`;
-        hint = isHunter ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)" : "WASD / arrows: move   E: become a nearby object   Q: change back";
+        hint = isHunter ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)" : "WASD / arrows: move   E: become a nearby object   Q: change back   (hold still to blend in)";
         break;
       case "end":
         title = "Round over";

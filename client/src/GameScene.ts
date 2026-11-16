@@ -47,6 +47,7 @@ export class GameScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private skins = new Map<string, Phaser.GameObjects.Image>();
   private selfRing?: Phaser.GameObjects.Arc;
+  private ringSettled?: boolean;
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
 
@@ -191,6 +192,7 @@ export class GameScene extends Phaser.Scene {
     if (isMe) {
       this.selfRing?.destroy();
       this.selfRing = undefined;
+      this.ringSettled = undefined;
     }
     if (!pt) return;
     this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5));
@@ -294,7 +296,7 @@ export class GameScene extends Phaser.Scene {
     skin?.setVisible(!hidden).setAlpha(ghost ? 0.35 : 1);
   }
 
-  update(_time: number, delta: number) {
+  update(time: number, delta: number) {
     const room = this.room;
     const state = room?.state;
     const me = this.me;
@@ -351,11 +353,24 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Disguise sprites and the self ring follow their player's dot.
+    // A prop that is moving (or has not held still long enough) wobbles: that is the tell.
     this.skins.forEach((img, id) => {
       const d = this.sprites.get(id);
       if (d) img.setPosition(d.x, d.y);
+      const settled = state.players.get(id)?.settled ?? true;
+      const sway = settled ? 0 : Math.sin(time / 70) * 0.16;
+      const pulse = settled ? 1 : 1 + Math.sin(time / 55) * 0.07;
+      img.rotation = Phaser.Math.Linear(img.rotation, sway, 0.35);
+      img.setScale(Phaser.Math.Linear(img.scaleX, pulse, 0.35));
     });
-    if (myDot) this.selfRing?.setPosition(myDot.x, myDot.y).setVisible(me.alive);
+    if (myDot) {
+      this.selfRing?.setPosition(myDot.x, myDot.y).setVisible(me.alive);
+      if (this.selfRing && this.ringSettled !== me.settled) {
+        this.ringSettled = me.settled;
+        // Green = perfect copy. Yellow = still wobbling.
+        this.selfRing.setStrokeStyle(2, me.settled ? 0x4ade80 : 0xfacc15);
+      }
+    }
 
     // Hunter: limited vision, plus an aiming marker.
     this.reticle.clear();
@@ -405,6 +420,20 @@ export class GameScene extends Phaser.Scene {
       if (near && near.type !== me.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
     }
     this.hud.setPrompt(prompt);
+
+    // Tell a disguised prop whether it is a perfect copy yet.
+    let note: string | null = null;
+    let noteColor = "#ffffff";
+    if (me.role === "prop" && me.alive && me.disguise && phase !== "end") {
+      if (me.settled) {
+        note = "Perfect copy — you are invisible among the real ones";
+        noteColor = "#9dffa8";
+      } else {
+        note = "Wobbling! Hold still to blend in";
+        noteColor = "#ffe27a";
+      }
+    }
+    this.hud.setNote(note, noteColor);
 
     this.hud.update({
       connected: true,

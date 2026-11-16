@@ -31,10 +31,11 @@ The server runs on port 2567.
   Hitting a hiding player finds them; hitting anything else costs 10 health (starts at 100).
 - Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
 - Props: **E** to become a nearby small object, **Q** to change back. Found props become ghosts.
+- A disguised prop that moves **wobbles** (a tell). Hold still for 1 second and it settles into a perfect copy.
 - Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
 
 ## Status
-Playable first version. Next ideas: hiding other players' positions from the hunter on the server, a lock-in-place move for props, sounds, real art.
+Playable first version. Next ideas: hiding other players' positions from the hunter on the server, sounds, real art.
 
 ## Hosting (Vercel)
 Two Vercel projects from this repo:

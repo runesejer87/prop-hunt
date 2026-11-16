@@ -30,6 +30,9 @@ export const HIDE_TIME = 15;
 export const HUNT_TIME = 180;
 export const END_TIME = 7;
 
+/** Props: stand still this long while disguised to become a perfect copy (no wobble). */
+export const SETTLE_TIME = 1.0;
+
 /** Hunter rules. */
 export const HUNTER_MAX_HP = 100;
 /** Health lost when the hunter hits something that is not a player. */
@@ -49,6 +52,8 @@ export const PlayerState = schema(
     y: t.number(),
     /** Id of the prop this player is disguised as, or "" when not disguised. */
     disguise: t.string(),
+    /** Disguised and standing still long enough: a perfect copy that does not wobble. */
+    settled: t.boolean(),
     /** False once the hunter has found you (you become a ghost). */
     alive: t.boolean(),
     /** Hunter health. Props ignore this. */
