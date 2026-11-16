@@ -24,7 +24,8 @@ The server runs on port 2567.
 
 ## Status
 Done: players join a room and move around a map of 9 rooms with walls and doors (shared/src/map.ts).
-Next: props to disguise as, hunter role + vision circle, round timer.
+Done: 82 props across the rooms. Press E near a small object to become it, Q to change back.
+Next: hunter role with a small vision circle, round timer, win/lose.
 
 ## Hosting (Vercel)
 Two Vercel projects from this repo:
