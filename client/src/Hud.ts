@@ -3,6 +3,14 @@ import { HUNTER_MAX_HP, MIN_PLAYERS } from "@prop-hunt/shared";
 
 const FONT = "sans-serif";
 
+export interface BoardRow {
+  name: string;
+  score: number;
+  gain: number;
+  role: string;
+  me: boolean;
+}
+
 /** Text and bars that sit on top of the game. */
 export class Hud {
   private title: Phaser.GameObjects.Text;
@@ -15,6 +23,9 @@ export class Hud {
   private prompt: Phaser.GameObjects.Text;
   private note: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text;
+  private boardBg: Phaser.GameObjects.Rectangle;
+  private boardTitle: Phaser.GameObjects.Text;
+  private boardRows: Phaser.GameObjects.Text[];
 
   constructor(private scene: Phaser.Scene) {
     const d = 100;
@@ -27,6 +38,16 @@ export class Hud {
     this.hpBack = scene.add.rectangle(0, 0, 200, 14, 0x000000, 0.6).setOrigin(1, 0).setScrollFactor(0).setDepth(d).setVisible(false);
     this.hpFill = scene.add.rectangle(0, 0, 200, 14, 0xef4444).setOrigin(1, 0).setScrollFactor(0).setDepth(d + 1).setVisible(false);
     this.hpLabel = text(13).setOrigin(1, 0).setVisible(false);
+    this.boardBg = scene.add.rectangle(0, 0, 440, 200, 0x000000, 0.72).setScrollFactor(0).setDepth(d + 2).setVisible(false);
+    this.boardTitle = text(22).setOrigin(0.5, 0).setDepth(d + 3).setVisible(false);
+    this.boardRows = [0, 1, 2, 3].map(() =>
+      scene.add
+        .text(0, 0, "", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(d + 3)
+        .setVisible(false),
+    );
     this.toastText = text(16).setOrigin(0, 0).setVisible(false);
     this.note = text(16).setOrigin(0.5, 1).setVisible(false);
     this.prompt = scene.add
@@ -41,6 +62,30 @@ export class Hud {
     const { width, height } = this.scene.scale;
     if (text) this.prompt.setText(text).setPosition(width / 2, height - 44).setVisible(true);
     else this.prompt.setVisible(false);
+  }
+
+  /** The scoreboard. Shown while Tab is held and on the results screen. */
+  setBoard(visible: boolean, rows: BoardRow[], round: number, belowBanner: boolean) {
+    const { width, height } = this.scene.scale;
+    const shown = visible && rows.length > 0;
+    this.boardBg.setVisible(shown);
+    this.boardTitle.setVisible(shown);
+    this.boardRows.forEach((r) => r.setVisible(false));
+    if (!shown) return;
+    const top = belowBanner ? height / 2 + 50 : height / 2 - 110;
+    const h = 56 + rows.length * 28;
+    this.boardBg.setPosition(width / 2, top + h / 2 - 8).setSize(440, h);
+    this.boardTitle.setText(round > 0 ? `Scores · round ${round}` : "Scores").setPosition(width / 2, top);
+    rows.slice(0, 4).forEach((row, i) => {
+      const gain = row.gain > 0 ? ` +${row.gain}` : "";
+      const tag = row.role === "hunter" ? " (hunter)" : "";
+      const label = `${i + 1}. ${row.name}${tag}`;
+      this.boardRows[i]!
+        .setText(`${label.padEnd(26)}${String(row.score).padStart(3)}${gain}`)
+        .setColor(row.me ? "#ffe27a" : "#ffffff")
+        .setPosition(width / 2 - 200, top + 36 + i * 28)
+        .setVisible(true);
+    });
   }
 
   /** A short message in the top left corner. */
@@ -67,6 +112,7 @@ export class Hud {
     hp: number;
     playerCount: number;
     propsLeft: number;
+    round?: number;
   }) {
     const { width, height } = this.scene.scale;
     this.title.setPosition(width / 2, 12);
@@ -90,7 +136,7 @@ export class Hud {
       case "lobby":
         title = info.playerCount < MIN_PLAYERS ? "Waiting for another player…" : `Round starts in ${info.timeLeft}`;
         sub = "Open this page in a second tab or send the link to a friend (2–4 players)";
-        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   M: sound";
+        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   Tab: scores   M: sound";
         break;
       case "hide":
         title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
@@ -99,7 +145,7 @@ export class Hud {
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
-        sub = `${mmss}   ·   Props left: ${info.propsLeft}`;
+        sub = `Round ${info.round ?? 0}   ·   ${mmss}   ·   Props left: ${info.propsLeft}`;
         hint = isHunter
           ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)   Yellow rings: something is moving nearby   M: sound"
           : "Don't run! The hunter is faster, and moving props give themselves away. Hide: E / Q / R, hold still.   M: sound";

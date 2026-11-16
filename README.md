@@ -10,6 +10,11 @@ One hunter searches the rooms; the others hide by disguising as objects.
 - **Vite** – client dev server and build
 - `shared/` – constants and synced state used by both sides
 
+## Names, rounds and scores
+Pick a name on the title screen. The game keeps going round after round and the hunter job rotates (whoever has hunted
+least goes next). Points: the hunter gets 2 per prop found, plus 2 for finding everyone; props get 3 for surviving.
+Hold **Tab** to see the scoreboard; it also shows at the end of each round.
+
 ## Password
 Set the `GAME_PASSWORD` environment variable on the **server** and players must enter it on a join screen
 (it is remembered for the browser tab). If it is not set, anyone can join (handy for local development).

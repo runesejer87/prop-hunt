@@ -44,10 +44,16 @@ export type Phase = "lobby" | "hide" | "hunt" | "end";
 export const LOBBY_COUNTDOWN = 5;
 export const HIDE_TIME = 15;
 export const HUNT_TIME = 180;
-export const END_TIME = 7;
+export const END_TIME = 10;
 
 /** Props: stand still this long while disguised to become a perfect copy (no wobble). */
 export const SETTLE_TIME = 1.0;
+
+/** Points. Hunter: per prop found, plus a bonus for finding all. Props: for surviving the round. */
+export const POINTS_PER_FIND = 2;
+export const POINTS_FOUND_ALL_BONUS = 2;
+export const POINTS_SURVIVE = 3;
+export const MAX_NAME_LENGTH = 14;
 
 /** Hunter rules. */
 export const HUNTER_MAX_HP = 100;
@@ -69,6 +75,10 @@ export const PlayerState = schema(
     alive: t.boolean(),
     /** Hunter health. Props ignore this. */
     hp: t.number(),
+    /** Total points over all rounds. */
+    score: t.number(),
+    /** Points earned in the round that just ended (shown on the results screen). */
+    gain: t.number(),
   },
   "PlayerState",
 );
@@ -103,6 +113,8 @@ export const GameState = schema(
     timeLeft: t.number(),
     /** "props" or "hunter" once a round is over, otherwise "". */
     winner: t.string(),
+    /** How many rounds have started so far. */
+    round: t.number(),
   },
   "GameState",
 );

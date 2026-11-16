@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
-import { Hud } from "./Hud.ts";
+import { Hud, type BoardRow } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
 import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, charKey } from "./art.ts";
 import {
@@ -48,6 +48,8 @@ export class GameScene extends Phaser.Scene {
   private keyQ!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
+  private keyTab!: Phaser.Input.Keyboard.Key;
+  private names = new Map<string, Phaser.GameObjects.Text>();
   private sfx = new Sound();
   private chars = new Map<string, Phaser.GameObjects.Image>();
   private skinShadows = new Map<string, Phaser.GameObjects.Image>();
@@ -82,6 +84,8 @@ export class GameScene extends Phaser.Scene {
     this.keyQ = this.input.keyboard!.addKey("Q");
     this.keyM = this.input.keyboard!.addKey("M");
     this.keyR = this.input.keyboard!.addKey("R");
+    this.keyTab = this.input.keyboard!.addKey("TAB");
+    this.input.keyboard!.addCapture("TAB");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
 
     // Browsers only allow sound after a click or key press.
@@ -162,6 +166,8 @@ export class GameScene extends Phaser.Scene {
       this.skinShadows.delete(id);
       this.chars.get(id)?.destroy();
       this.chars.delete(id);
+      this.names.get(id)?.destroy();
+      this.names.delete(id);
       this.styleOf.delete(id);
       this.skinReady.delete(id);
       this.lastPos.delete(id);
@@ -269,6 +275,19 @@ export class GameScene extends Phaser.Scene {
     char.setVisible(!skin && !hidden).setAlpha(ghost ? 0.35 : 1);
     skin?.setVisible(!hidden).setAlpha(ghost ? 0.35 : 1);
     this.skinShadows.get(id)?.setVisible(!hidden && !ghost);
+
+    // A name tag over everyone else while they look like themselves.
+    if (id !== this.room!.sessionId) {
+      let tag = this.names.get(id);
+      if (!tag) {
+        tag = this.add
+          .text(0, 0, p.name, { fontFamily: "sans-serif", fontSize: "12px", color: "#ffffff", stroke: "#000000", strokeThickness: 3 })
+          .setOrigin(0.5, 1)
+          .setDepth(6);
+        this.names.set(id, tag);
+      }
+      tag.setPosition(char.x, char.y - 22).setVisible(!skin && !hidden && !ghost).setText(p.name);
+    }
   }
 
   /** Characters follow their anchors, turn toward where they go, and make footsteps. */
@@ -488,8 +507,14 @@ export class GameScene extends Phaser.Scene {
     }
     this.hud.setNote(note, noteColor);
 
+    const rows: BoardRow[] = [];
+    state.players.forEach((p: PlayerState, id: string) => rows.push({ name: p.name, score: p.score, gain: p.gain, role: p.role, me: id === room.sessionId }));
+    rows.sort((a, b) => b.score - a.score);
+    this.hud.setBoard(this.keyTab.isDown || phase === "end", rows, state.round, phase === "end");
+
     this.hud.update({
       connected: true,
+      round: state.round,
       phase,
       timeLeft: state.timeLeft,
       winner: state.winner,

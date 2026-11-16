@@ -37,6 +37,10 @@ import {
   HIDE_TIME,
   HUNT_TIME,
   END_TIME,
+  POINTS_PER_FIND,
+  POINTS_FOUND_ALL_BONUS,
+  POINTS_SURVIVE,
+  MAX_NAME_LENGTH,
   HUNTER_MAX_HP,
   WRONG_HIT_PENALTY,
   ATTACK_RANGE,
@@ -63,6 +67,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   private stillFor = new Map<string, number>();
   /** Seconds each moving prop has been on the move since it last gave itself away. */
   private noise = new Map<string, number>();
+  /** How many times each player has been the hunter, so the job rotates. */
+  private hunts = new Map<string, number>();
 
   messages = {
     [MSG_INPUT]: (client: Client, msg: InputMessage) => {
@@ -114,13 +120,23 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.phase = "lobby";
     this.state.timeLeft = 0;
     this.state.winner = "";
+    this.state.round = 0;
     this.setSimulationInterval((deltaMs) => this.update(deltaMs / 1000), 1000 / TICK_RATE);
   }
 
-  onJoin(client: Client) {
+  /** A tidy display name: letters, numbers, spaces and a few symbols, not too long. */
+  private cleanName(raw: unknown): string {
+    const text = typeof raw === "string" ? raw : "";
+    const name = text.replace(/[^\p{L}\p{N} _.-]/gu, "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_LENGTH);
+    return name || `Player ${this.clients.length}`;
+  }
+
+  onJoin(client: Client, options?: { name?: unknown }) {
     const player = new PlayerState();
     player.id = client.sessionId;
-    player.name = `Player ${this.clients.length}`;
+    player.name = this.cleanName(options?.name);
+    player.score = 0;
+    player.gain = 0;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
@@ -147,6 +163,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.moveInputs.delete(client.sessionId);
     this.stillFor.delete(client.sessionId);
     this.noise.delete(client.sessionId);
+    this.hunts.delete(client.sessionId);
   }
 
   // ------------------------------------------------------------ visibility
@@ -220,10 +237,16 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   private startRound() {
     const all = this.players();
-    const hunterIndex = Math.floor(Math.random() * all.length);
-    all.forEach((p, i) => {
+    // The player who has been hunter the fewest times goes next (ties are random).
+    const fewest = Math.min(...all.map((p) => this.hunts.get(p.id) ?? 0));
+    const candidates = all.filter((p) => (this.hunts.get(p.id) ?? 0) === fewest);
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)]!;
+    this.hunts.set(chosen.id, fewest + 1);
+    this.state.round += 1;
+    all.forEach((p) => {
       const body = this.state.bodies.get(p.id)!;
-      p.role = i === hunterIndex ? "hunter" : "prop";
+      p.gain = 0;
+      p.role = p === chosen ? "hunter" : "prop";
       p.alive = true;
       p.hp = HUNTER_MAX_HP;
       this.clearDisguise(p.id, body);
@@ -244,6 +267,16 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   }
 
   private endRound(winner: "props" | "hunter") {
+    // Points: the hunter earns for each prop found; props earn for surviving.
+    const all = this.players();
+    const found = all.filter((p) => p.role === "prop" && !p.alive).length;
+    for (const p of all) {
+      let gain = 0;
+      if (p.role === "hunter") gain = found * POINTS_PER_FIND + (winner === "hunter" ? POINTS_FOUND_ALL_BONUS : 0);
+      else if (p.role === "prop" && p.alive) gain = POINTS_SURVIVE;
+      p.gain = gain;
+      p.score += gain;
+    }
     this.state.winner = winner;
     this.setPhase("end", END_TIME);
   }
