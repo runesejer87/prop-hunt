@@ -1,5 +1,13 @@
 {
   "buildCommand": "npm run build",
   "installCommand": "cd .. && npm install",
-  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
+  ],
+  "regions": [
+    "arn1"
+  ]
 }
