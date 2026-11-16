@@ -25,3 +25,8 @@ The server runs on port 2567.
 ## Status
 Base only: players join a room and move around an empty map.
 Next: rooms/map, props to disguise as, hunter role + vision circle, round timer.
+
+## Hosting (Vercel)
+Two Vercel projects from this repo:
+- `prop-hunt-server` – root directory `server` (Colyseus as a Vercel Function)
+- `prop-hunt` – root directory `client`, with env var `VITE_SERVER_URL` set to the server URL
