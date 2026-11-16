@@ -36,7 +36,9 @@ export class GameScene extends Phaser.Scene {
 
   private async connect() {
     try {
-      const client = new Client(`ws://${location.hostname}:${SERVER_PORT}`);
+      // Hosted builds set VITE_SERVER_URL; local dev uses the server on port 2567.
+      const serverUrl = import.meta.env.VITE_SERVER_URL || `ws://${location.hostname}:${SERVER_PORT}`;
+      const client = new Client(serverUrl);
       this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {}, GameState);
       this.status.setText("Connected — move with WASD / arrow keys");
 

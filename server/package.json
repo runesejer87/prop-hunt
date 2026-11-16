@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit && esbuild src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/vercel.mjs --external:uWebSockets.js --external:ioredis --external:@colyseus/uwebsockets-transport --external:@colyseus/redis-driver --external:@colyseus/redis-presence --external:@colyseus/monitor --external:@colyseus/playground --external:@colyseus/auth --external:better-sqlite3 --external:pg --external:mysql2 --external:mongodb --banner:js=\"import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -14,5 +14,9 @@
     "@colyseus/ws-transport": "^0.18.5",
     "@prop-hunt/shared": "^0.1.0",
     "colyseus": "^0.18.12"
-  }
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "main": "dist/vercel.mjs"
 }

@@ -1,12 +1,8 @@
-import { defineServer, defineRoom } from "colyseus";
-import { ROOM_NAME, SERVER_PORT } from "@prop-hunt/shared";
-import { PropHuntRoom } from "./PropHuntRoom.ts";
+import { defineServer } from "colyseus";
+import { SERVER_PORT } from "@prop-hunt/shared";
+import { rooms } from "./app.ts";
 
-const server = defineServer({
-  rooms: {
-    [ROOM_NAME]: defineRoom(PropHuntRoom),
-  },
-});
+const server = defineServer({ rooms });
 
 const port = Number(process.env.PORT) || SERVER_PORT;
 await server.listen(port);
