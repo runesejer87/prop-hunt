@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { Client, Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { Hud } from "./Hud.ts";
+import { Sound } from "./Sound.ts";
+import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, charKey } from "./art.ts";
 import {
   ROOM_NAME,
   SERVER_PORT,
@@ -15,16 +17,9 @@ import {
   VISION_RADIUS,
   Sight,
   PROP_TYPES,
-  PLACED_PROPS,
   nearestDisguisableProp,
-  type PropType,
   WORLD_WIDTH,
   WORLD_HEIGHT,
-  TILE,
-  ROOMS,
-  isWallTile,
-  MAP_COLS,
-  MAP_ROWS,
   moveWithCollision,
   PLAYER_RADIUS,
   PLAYER_SPEED,
@@ -51,23 +46,40 @@ export class GameScene extends Phaser.Scene {
   private ringSettled?: boolean;
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
+  private keyM!: Phaser.Input.Keyboard.Key;
+  private sfx = new Sound();
+  private chars = new Map<string, Phaser.GameObjects.Image>();
+  private skinShadows = new Map<string, Phaser.GameObjects.Image>();
+  private skinReady = new Set<string>();
+  private lastPos = new Map<string, { x: number; y: number }>();
+  private stepAcc = new Map<string, number>();
+  private prevPhase = "";
+  private prevTime = -1;
+  private prevSettled = false;
 
   constructor() {
     super("GameScene");
   }
 
   create() {
-    this.makePropTextures();
-    this.drawMap();
-    this.placeProps();
+    makePropTextures(this);
+    makeCharacterTextures(this);
+    drawWorld(this);
+    placeProps(this);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as typeof this.wasd;
     this.keyE = this.input.keyboard!.addKey("E");
     this.keyQ = this.input.keyboard!.addKey("Q");
-
+    this.keyM = this.input.keyboard!.addKey("M");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
+
+    // Browsers only allow sound after a click or key press.
+    const unlock = () => this.sfx.unlock();
+    this.input.keyboard!.on("keydown", unlock);
+    this.input.on("pointerdown", unlock);
+
     this.hud = new Hud(this);
     this.fog = new Fog(this, WORLD_WIDTH, WORLD_HEIGHT);
     this.reticle = this.add.graphics().setDepth(60);
@@ -77,125 +89,41 @@ export class GameScene extends Phaser.Scene {
     void this.connect();
   }
 
-  /** Draw floors, walls and room names once. */
-  private drawMap() {
-    const g = this.add.graphics().setDepth(0);
-    g.fillStyle(0x15171c).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-    for (const room of ROOMS) {
-      g.fillStyle(room.color).fillRect(room.x * TILE, room.y * TILE, room.w * TILE, room.h * TILE);
-    }
-    // Doorways and corridors are floor tiles outside any room: give them a neutral colour.
-    g.fillStyle(0x3a3a40);
-    for (let row = 0; row < MAP_ROWS; row++) {
-      for (let col = 0; col < MAP_COLS; col++) {
-        if (isWallTile(col, row)) continue;
-        const inRoom = ROOMS.some((r) => col >= r.x && col < r.x + r.w && row >= r.y && row < r.y + r.h);
-        if (!inRoom) g.fillRect(col * TILE, row * TILE, TILE, TILE);
-      }
-    }
-
-    // Subtle floor grid
-    g.lineStyle(1, 0x000000, 0.12);
-    for (let col = 0; col <= MAP_COLS; col++) g.lineBetween(col * TILE, 0, col * TILE, WORLD_HEIGHT);
-    for (let row = 0; row <= MAP_ROWS; row++) g.lineBetween(0, row * TILE, WORLD_WIDTH, row * TILE);
-
-    // Walls: only draw ones touching a floor tile, with a lighter edge.
-    for (let row = 0; row < MAP_ROWS; row++) {
-      for (let col = 0; col < MAP_COLS; col++) {
-        if (!isWallTile(col, row)) continue;
-        const nearFloor = [-1, 0, 1].some((dj) => [-1, 0, 1].some((di) => !isWallTile(col + di, row + dj)));
-        if (!nearFloor) continue;
-        g.fillStyle(0x23252c).fillRect(col * TILE, row * TILE, TILE, TILE);
-        g.fillStyle(0x5a5f6b).fillRect(col * TILE, row * TILE, TILE, 3);
-      }
-    }
-
-    for (const room of ROOMS) {
-      this.add
-        .text((room.x + room.w / 2) * TILE, (room.y + 0.6) * TILE, room.name.toUpperCase(), {
-          fontFamily: "sans-serif",
-          fontSize: "14px",
-          color: "#ffffff",
-        })
-        .setOrigin(0.5, 0)
-        .setAlpha(0.35)
-        .setDepth(1);
-    }
+  /** How loud and how far left/right a sound at (x, y) is for me. */
+  private audioFrom(x: number, y: number): { vol: number; pan: number } {
+    const my = this.room ? this.sprites.get(this.room.sessionId) : undefined;
+    if (!my) return { vol: 1, pan: 0 };
+    const dx = x - my.x;
+    const dy = y - my.y;
+    return { vol: Math.max(0, 1 - Math.hypot(dx, dy) / 420), pan: Math.max(-1, Math.min(1, dx / 260)) };
   }
 
-  /** Draw each prop type once into a texture; sprites reuse it (cheap for the GPU). */
-  private makePropTextures() {
-    for (const pt of Object.values(PROP_TYPES)) {
-      const g = this.make.graphics({ x: 0, y: 0 }, false);
-      this.paintProp(g, pt);
-      g.generateTexture(`prop_${pt.id}`, pt.w, pt.h);
-      g.destroy();
-    }
-  }
-
-  private paintProp(g: Phaser.GameObjects.Graphics, pt: PropType) {
-    const { w, h } = pt;
-    if (pt.shape === "circle") {
-      g.fillStyle(pt.accent).fillCircle(w / 2, h / 2, w / 2);
-      g.fillStyle(pt.color).fillCircle(w / 2, h / 2, w / 2 - 2);
-    } else {
-      g.fillStyle(pt.accent).fillRoundedRect(0, 0, w, h, 4);
-      g.fillStyle(pt.color).fillRoundedRect(2, 2, w - 4, h - 4, 3);
-    }
-    const dark = pt.accent;
-    switch (pt.detail) {
-      case "cross":
-        g.lineStyle(2, dark).lineBetween(4, 4, w - 4, h - 4).lineBetween(w - 4, 4, 4, h - 4);
-        break;
-      case "back":
-        g.fillStyle(dark).fillRoundedRect(3, 3, w - 6, Math.max(5, h * 0.22), 2);
-        break;
-      case "leaves":
-        g.fillStyle(dark);
-        for (let a = 0; a < 6; a++) g.fillCircle(w / 2 + Math.cos(a * 1.05) * w * 0.22, h / 2 + Math.sin(a * 1.05) * h * 0.22, w * 0.16);
-        g.fillStyle(0x5cb85c).fillCircle(w / 2, h / 2, w * 0.14);
-        break;
-      case "shade":
-        g.fillStyle(0xfff4c0).fillCircle(w / 2, h / 2, w * 0.28);
-        break;
-      case "pillow":
-        g.fillStyle(0xe8ecf4).fillRoundedRect(w * 0.12, 6, w * 0.34, 18, 4).fillRoundedRect(w * 0.54, 6, w * 0.34, 18, 4);
-        break;
-      case "lines":
-        g.lineStyle(2, dark);
-        for (let y = 7; y < h - 3; y += 8) g.lineBetween(5, y, w - 5, y);
-        break;
-      case "globe":
-        g.lineStyle(1.5, 0xcfe6f5).strokeCircle(w / 2, h / 2, w * 0.28).lineBetween(w * 0.2, h / 2, w * 0.8, h / 2);
-        break;
-      case "bowl":
-        g.fillStyle(dark).fillCircle(w / 2, h / 2, Math.min(w, h) * 0.28);
-        break;
-      default:
-        break;
-    }
-  }
-
-  private placeProps() {
-    for (const p of PLACED_PROPS) this.add.image(p.x, p.y, `prop_${p.type}`).setDepth(2);
-  }
-
-  /** Show a player as a prop (or as a plain dot when `typeId` is empty). */
+  /** Show a player as a prop (or as themselves when `typeId` is empty). */
   private setSkin(id: string, typeId: string) {
     const dot = this.sprites.get(id);
     if (!dot) return;
     const isMe = id === this.room?.sessionId;
+    const had = this.skins.has(id);
     this.skins.get(id)?.destroy();
     this.skins.delete(id);
+    this.skinShadows.get(id)?.destroy();
+    this.skinShadows.delete(id);
     const pt = typeId ? PROP_TYPES[typeId] : undefined;
-    dot.setVisible(!pt);
     if (isMe) {
       this.selfRing?.destroy();
       this.selfRing = undefined;
       this.ringSettled = undefined;
     }
+
+    // Sounds, but not for a body that has just come into view already disguised.
+    if (this.skinReady.has(id) && (pt || had)) {
+      const { vol, pan } = this.audioFrom(dot.x, dot.y);
+      if (vol > 0.03) (pt ? this.sfx.poof : this.sfx.unpoof).call(this.sfx, isMe ? 0.8 : vol, isMe ? 0 : pan);
+    }
+    this.skinReady.add(id);
+
     if (!pt) return;
+    this.skinShadows.set(id, this.add.image(dot.x + 3, dot.y + 4, `shadow_${pt.id}`).setAlpha(0.3).setDepth(4.5));
     this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5));
     if (isMe) {
       // A thin green ring so you can still find yourself among the lookalikes.
@@ -223,7 +151,14 @@ export class GameScene extends Phaser.Scene {
         this.sprites.delete(id);
         this.skins.get(id)?.destroy();
         this.skins.delete(id);
+        this.skinShadows.get(id)?.destroy();
+        this.skinShadows.delete(id);
+        this.chars.get(id)?.destroy();
+        this.chars.delete(id);
         this.styleOf.delete(id);
+        this.skinReady.delete(id);
+        this.lastPos.delete(id);
+        this.stepAcc.delete(id);
         if (id === this.room?.sessionId) this.selfRing?.destroy();
       });
       this.room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
@@ -239,8 +174,11 @@ export class GameScene extends Phaser.Scene {
 
   private addBody(b: BodyState, id: string) {
     const isMe = id === this.room?.sessionId;
-    const dot = this.add.circle(b.x, b.y, PLAYER_RADIUS, isMe ? 0x4ade80 : 0xf59e0b).setDepth(5);
+    // The "dot" is an invisible anchor: it holds the position that everything else follows.
+    const dot = this.add.circle(b.x, b.y, PLAYER_RADIUS).setVisible(false);
     this.sprites.set(id, dot);
+    this.chars.set(id, this.add.image(b.x, b.y, "char_0").setDepth(5));
+    this.lastPos.set(id, { x: b.x, y: b.y });
     if (isMe) this.cameras.main.startFollow(dot, true, 0.15, 0.15);
   }
 
@@ -266,12 +204,31 @@ export class GameScene extends Phaser.Scene {
     this.room!.send(MSG_ATTACK, { x: ptr.worldX, y: ptr.worldY });
   }
 
-  /** A quick ring and message where a swing landed. */
+  /** A slash, a ring and a message where a swing landed, plus its sounds. */
   private showSwing(e: SwingEvent) {
+    const { vol, pan } = this.audioFrom(e.x, e.y);
+    this.sfx.swing(Math.max(vol, 0.25), pan);
+    if (e.result === "player") this.sfx.found(Math.max(vol, 0.4), pan);
+    else if (e.result === "prop") this.sfx.wrongHit(Math.max(vol, 0.4), pan);
+
+    // Find the hunter to draw the slash from.
+    let from: Phaser.GameObjects.Arc | undefined;
+    this.room?.state.players.forEach((p: PlayerState, id: string) => {
+      if (p.role === "hunter") from = this.sprites.get(id);
+    });
+    if (from) {
+      const ang = Math.atan2(e.y - from.y, e.x - from.x);
+      const slash = this.add.graphics().setDepth(70);
+      slash.lineStyle(5, 0xffffff, 0.85).beginPath().arc(from.x, from.y, 34, ang - 0.9, ang + 0.9).strokePath();
+      slash.lineStyle(2, 0xffffff, 0.5).beginPath().arc(from.x, from.y, 42, ang - 0.7, ang + 0.7).strokePath();
+      this.tweens.add({ targets: slash, alpha: 0, duration: 200, onComplete: () => slash.destroy() });
+    }
+
     const color = e.result === "player" ? 0x4ade80 : e.result === "prop" ? 0xef4444 : 0xaaaaaa;
     const ring = this.add.circle(e.x, e.y, 8).setStrokeStyle(3, color).setDepth(70);
     this.tweens.add({ targets: ring, radius: 30, alpha: 0, duration: 300, onComplete: () => ring.destroy() });
     if (e.result === "nothing") return;
+    if (e.result === "prop" && this.me?.role === "hunter") this.cameras.main.shake(130, 0.005);
     const label = this.add
       .text(e.x, e.y - 20, e.result === "player" ? "FOUND!" : "Just an object", {
         fontFamily: "sans-serif",
@@ -287,21 +244,88 @@ export class GameScene extends Phaser.Scene {
 
   // ------------------------------------------------------------- frame
 
-  /** Colour, visibility and transparency of each player's dot / disguise. */
-  private styleAndVisibility(id: string, p: PlayerState, dot: Phaser.GameObjects.Arc, myRole: string) {
-    const isMe = id === this.room!.sessionId;
+  /** Picture, visibility and transparency of each player's character / disguise. */
+  private styleAndVisibility(id: string, p: PlayerState, myRole: string) {
     const ghost = !p.alive || p.role === "spectator";
-    const key = `${p.role}|${ghost}|${isMe}`;
-    if (this.styleOf.get(id) !== key) {
-      this.styleOf.set(id, key);
-      const color = p.role === "hunter" ? 0xef4444 : isMe ? 0x4ade80 : 0xf59e0b;
-      dot.setFillStyle(color, ghost ? 0.35 : 1);
-    }
+    const char = this.chars.get(id);
+    if (!char) return;
+    const key = charKey(p.role, id);
+    if (char.texture.key !== key) char.setTexture(key);
     // The hunter never sees ghosts; everyone else sees them faintly.
     const hidden = ghost && myRole === "hunter";
     const skin = this.skins.get(id);
-    dot.setVisible(!skin && !hidden);
+    char.setVisible(!skin && !hidden).setAlpha(ghost ? 0.35 : 1);
     skin?.setVisible(!hidden).setAlpha(ghost ? 0.35 : 1);
+    this.skinShadows.get(id)?.setVisible(!hidden && !ghost);
+  }
+
+  /** Characters follow their anchors, turn toward where they go, and make footsteps. */
+  private updateCharacters(state: GameState, me: PlayerState, myId: string) {
+    this.chars.forEach((img, id) => {
+      const dot = this.sprites.get(id);
+      const info = state.players.get(id);
+      if (!dot || !info) return;
+      img.setPosition(dot.x, dot.y);
+
+      const last = this.lastPos.get(id) ?? { x: dot.x, y: dot.y };
+      const moved = Math.hypot(dot.x - last.x, dot.y - last.y);
+      this.lastPos.set(id, { x: dot.x, y: dot.y });
+
+      // The hunter faces the mouse; everyone else faces the way they walk.
+      if (id === myId && me.role === "hunter" && state.phase === "hunt") {
+        const ptr = this.input.activePointer;
+        img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(ptr.worldY - dot.y, ptr.worldX - dot.x), 0.3);
+      } else if (moved > 0.4) {
+        img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(dot.y - last.y, dot.x - last.x), 0.25);
+      }
+
+      // Footsteps every so often while moving. Ghosts are silent.
+      if (moved < 0.2 || moved > 60 || !info.alive || info.role === "spectator") return;
+      const acc = (this.stepAcc.get(id) ?? 0) + moved;
+      if (acc < 46) {
+        this.stepAcc.set(id, acc);
+        return;
+      }
+      this.stepAcc.set(id, acc - 46);
+      const { vol, pan } = id === myId ? { vol: 0.7, pan: 0 } : this.audioFrom(dot.x, dot.y);
+      if (vol < 0.05) return;
+      const body = state.bodies.get(id);
+      // A prop dragging itself around makes a scraping noise: another tell.
+      if (body?.disguise) this.sfx.scrape(vol, pan);
+      else this.sfx.step(vol, pan);
+    });
+  }
+
+  /** Round start, countdown ticks, results, settling and background hum. */
+  private updateSounds(state: GameState, me: PlayerState, myBody: BodyState, myId: string) {
+    void myId;
+    const phase = state.phase;
+    if (phase !== this.prevPhase) {
+      if (phase === "hide") this.sfx.roundStart();
+      if (phase === "hunt") {
+        this.sfx.huntStart();
+        this.sfx.startAmbience();
+      }
+      if (phase === "end") {
+        this.sfx.stopAmbience();
+        const propsWon = state.winner === "props";
+        if (me.role === "hunter") (propsWon ? this.sfx.lose : this.sfx.win).call(this.sfx);
+        else if (me.role === "prop") (propsWon ? this.sfx.win : this.sfx.lose).call(this.sfx);
+      }
+      if (phase === "lobby") this.sfx.stopAmbience();
+      this.prevPhase = phase;
+    }
+
+    // Countdown beeps: lobby start and the last seconds of hiding.
+    if (state.timeLeft !== this.prevTime) {
+      const t = state.timeLeft;
+      if ((phase === "lobby" && t > 0 && t <= 3) || (phase === "hide" && t > 0 && t <= 3)) this.sfx.tick(t === 1);
+      this.prevTime = t;
+    }
+
+    // A soft chime when you become a perfect copy.
+    if (myBody.settled && !this.prevSettled) this.sfx.settle();
+    this.prevSettled = myBody.settled;
   }
 
   update(time: number, delta: number) {
@@ -329,12 +353,13 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyE)) room.send(MSG_DISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
+    if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
     state.bodies.forEach((p: BodyState, id: string) => {
       const dot = this.sprites.get(id);
       const info = state.players.get(id);
       if (!dot || !info) return;
-      this.styleAndVisibility(id, info, dot, me.role);
+      this.styleAndVisibility(id, info, me.role);
 
       if (id !== room.sessionId) {
         // Other players: glide toward the latest server position.
@@ -362,6 +387,9 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
+    this.updateCharacters(state, me, room.sessionId);
+    this.updateSounds(state, me, myBody, room.sessionId);
+
     // Disguise sprites and the self ring follow their player's dot.
     // A prop that is moving (or has not held still long enough) wobbles: that is the tell.
     this.skins.forEach((img, id) => {
@@ -372,6 +400,7 @@ export class GameScene extends Phaser.Scene {
       const pulse = settled ? 1 : 1 + Math.sin(time / 55) * 0.07;
       img.rotation = Phaser.Math.Linear(img.rotation, sway, 0.35);
       img.setScale(Phaser.Math.Linear(img.scaleX, pulse, 0.35));
+      this.skinShadows.get(id)?.setPosition(img.x + 3, img.y + 4).setRotation(img.rotation).setScale(img.scaleX);
     });
     if (myDot) {
       this.selfRing?.setPosition(myDot.x, myDot.y).setVisible(me.alive);

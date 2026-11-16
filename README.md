@@ -35,8 +35,15 @@ The server runs on port 2567.
 - A disguised prop that moves **wobbles** (a tell). Hold still for 1 second and it settles into a perfect copy.
 - Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
 
+## Art and sound
+Everything is made in code, so there are no image or sound files to manage:
+- `client/src/art.ts` paints floors, walls, rugs, furniture, shadows and the little characters once at start-up.
+  To use real artwork later, load images under the same texture keys (`prop_<id>`, `char_0..3`, `char_hunter`).
+- `client/src/Sound.ts` makes every sound effect with the browser's Web Audio.
+  Press **M** to mute. Footsteps get quieter and pan left/right with distance, and a disguised prop that moves makes a scraping noise.
+
 ## Status
-Playable first version. Next ideas: sounds, real art, a trial with friends to tune the numbers.
+Playable first version. Next ideas: a trial with friends to tune the numbers, real artwork and recorded sounds if wanted, a name entry and title screen.
 
 ## Hosting (Vercel)
 Two Vercel projects from this repo:
