@@ -86,28 +86,6 @@ export function roomIndexAt(col: number, row: number): number {
   return ROOMS.findIndex((r) => col >= r.x && col < r.x + r.w && row >= r.y && row < r.y + r.h);
 }
 
-/** Does a square of half-size `r`, centred at (x, y) pixels, touch a wall? */
-function hitsWall(x: number, y: number, r: number): boolean {
-  const c0 = Math.floor((x - r) / TILE);
-  const c1 = Math.floor((x + r) / TILE);
-  const r0 = Math.floor((y - r) / TILE);
-  const r1 = Math.floor((y + r) / TILE);
-  for (let j = r0; j <= r1; j++) for (let i = c0; i <= c1; i++) if (isWallTile(i, j)) return true;
-  return false;
-}
-
-/**
- * Move from (x, y) by (dx, dy) pixels, sliding along walls.
- * Used by the server and by the client's own-movement prediction.
- */
-export function moveWithCollision(x: number, y: number, dx: number, dy: number, radius: number): { x: number; y: number } {
-  let nx = x;
-  let ny = y;
-  if (!hitsWall(x + dx, y, radius)) nx = x + dx;
-  if (!hitsWall(nx, y + dy, radius)) ny = y + dy;
-  return { x: nx, y: ny };
-}
-
 /** Centre of a room in pixels, used for spawning. */
 export function roomCenter(room: Room): { x: number; y: number } {
   return { x: (room.x + room.w / 2) * TILE, y: (room.y + room.h / 2) * TILE };

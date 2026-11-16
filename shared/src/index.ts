@@ -1,6 +1,8 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
 
 export * from "./map.ts";
+export * from "./props.ts";
+export * from "./collision.ts";
 
 /** Name used when joining the game room. */
 export const ROOM_NAME = "prop_hunt";
@@ -26,6 +28,8 @@ export const PlayerState = schema(
     role: t.string(),
     x: t.number(),
     y: t.number(),
+    /** Id of the prop this player is disguised as, or "" when not disguised. */
+    disguise: t.string(),
   },
   "PlayerState",
 );
@@ -46,3 +50,8 @@ export interface InputMessage {
   dy: number;
 }
 export const MSG_INPUT = "input";
+
+/** Become the nearest prop in range. */
+export const MSG_DISGUISE = "disguise";
+/** Go back to normal. */
+export const MSG_UNDISGUISE = "undisguise";

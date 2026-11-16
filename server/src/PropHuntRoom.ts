@@ -4,11 +4,17 @@ import {
   PlayerState,
   InputMessage,
   MSG_INPUT,
+  MSG_DISGUISE,
+  MSG_UNDISGUISE,
+  PROP_TYPES,
+  nearestDisguisableProp,
+  isBlocked,
   MAX_PLAYERS,
   TICK_RATE,
   PLAYER_SPEED,
   PLAYER_RADIUS,
   ROOMS,
+  TILE,
   roomCenter,
   moveWithCollision,
 } from "@prop-hunt/shared";
@@ -29,6 +35,16 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         dy: clamp(Math.sign(Number(msg?.dy) || 0), -1, 1),
       });
     },
+    [MSG_DISGUISE]: (client: Client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const prop = nearestDisguisableProp(player.x, player.y);
+      if (prop && PROP_TYPES[prop.type]) player.disguise = prop.type;
+    },
+    [MSG_UNDISGUISE]: (client: Client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player) player.disguise = "";
+    },
   };
 
   onCreate() {
@@ -40,11 +56,21 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.id = client.sessionId;
     player.name = `Player ${this.clients.length}`;
     player.role = "prop";
-    // Start in a random room, nudged so players don't stack exactly.
+    player.disguise = "";
+    // Start in a random room, on a spot that isn't inside a wall or prop.
     const room = ROOMS[Math.floor(Math.random() * ROOMS.length)]!;
     const c = roomCenter(room);
-    player.x = c.x + (Math.random() - 0.5) * 80;
-    player.y = c.y + (Math.random() - 0.5) * 80;
+    player.x = c.x;
+    player.y = c.y;
+    for (let i = 0; i < 200; i++) {
+      const x = room.x * TILE + (1 + Math.random() * (room.w - 2)) * TILE;
+      const y = room.y * TILE + (1 + Math.random() * (room.h - 2)) * TILE;
+      if (!isBlocked(x, y, PLAYER_RADIUS + 2)) {
+        player.x = x;
+        player.y = y;
+        break;
+      }
+    }
     this.state.players.set(client.sessionId, player);
   }
 
