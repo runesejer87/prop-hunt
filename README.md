@@ -57,6 +57,7 @@ hiders have lookalikes; themed things (toilet, tire, globe) belong to one room, 
 Everything is made in code, so there are no image or sound files to manage:
 - `client/src/art.ts` paints floors, walls, rugs, furniture, shadows and the little characters once at start-up.
   To use real artwork later, load images under the same texture keys (`prop_<id>`, `char_0..3`, `char_hunter`).
+- Lighting and effects: glowing lamps, TVs and monitors, a vignette, walking animations, dust and spark bursts, a pop when you become an object, and a time bar.
 - `client/src/Sound.ts` makes every sound effect with the browser's Web Audio.
   Press **M** to mute. Footsteps get quieter and pan left/right with distance, and a disguised prop that moves makes a scraping noise.
 

@@ -3,7 +3,7 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { Hud, type BoardRow } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
-import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, charKey } from "./art.ts";
+import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, makeLightTextures, placeLights, charKey } from "./art.ts";
 import {
   MSG_INPUT,
   MSG_DISGUISE,
@@ -15,6 +15,8 @@ import {
   type SwingEvent,
   ATTACK_RANGE,
   VISION_RADIUS,
+  HIDE_TIME,
+  HUNT_TIME,
   Sight,
   PROP_TYPES,
   nearestDisguisableProp,
@@ -56,6 +58,9 @@ export class GameScene extends Phaser.Scene {
   private skinReady = new Set<string>();
   private lastPos = new Map<string, { x: number; y: number }>();
   private stepAcc = new Map<string, number>();
+  private walkPhase = new Map<string, number>();
+  private idleFrames = new Map<string, number>();
+  private vignette!: Phaser.GameObjects.Image;
   private prevPhase = "";
   private prevTime = -1;
   private prevSettled = false;
@@ -74,8 +79,10 @@ export class GameScene extends Phaser.Scene {
   create() {
     makePropTextures(this);
     makeCharacterTextures(this);
+    makeLightTextures(this);
     drawWorld(this);
     placeProps(this);
+    placeLights(this);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -92,6 +99,14 @@ export class GameScene extends Phaser.Scene {
     const unlock = () => this.sfx.unlock();
     this.input.keyboard!.on("keydown", unlock);
     this.input.on("pointerdown", unlock);
+
+    // Dark edges around the screen, and a gentle zoom-in when the game starts.
+    this.vignette = this.add.image(0, 0, "vignette").setOrigin(0).setScrollFactor(0).setDepth(90);
+    const fitVignette = () => this.vignette.setDisplaySize(this.scale.width, this.scale.height);
+    fitVignette();
+    this.scale.on("resize", fitVignette);
+    this.cameras.main.setZoom(0.85);
+    this.tweens.add({ targets: this.cameras.main, zoom: 1, duration: 900, ease: "Cubic.easeOut" });
 
     this.hud = new Hud(this);
     this.fog = new Fog(this, WORLD_WIDTH, WORLD_HEIGHT);
@@ -129,16 +144,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Sounds, but not for a body that has just come into view already disguised.
-    if (this.skinReady.has(id) && (pt || had)) {
+    const wasReady = this.skinReady.has(id);
+    if (wasReady && (pt || had)) {
       const { vol, pan } = this.audioFrom(dot.x, dot.y);
       if (vol > 0.03) (pt ? this.sfx.poof : this.sfx.unpoof).call(this.sfx, isMe ? 0.8 : vol, isMe ? 0 : pan);
+      this.burst(dot.x, dot.y, 0xe8e4da, pt ? 12 : 8, 70, 520, 3.6, 0.8);
     }
     this.skinReady.add(id);
 
     if (!pt) return;
     const turn = ((this.room?.state.bodies.get(id)?.rot ?? 0) * Math.PI) / 2;
     this.skinShadows.set(id, this.add.image(dot.x + 3, dot.y + 4, `shadow_${pt.id}`).setAlpha(0.3).setDepth(4.5).setRotation(turn));
-    this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5).setRotation(turn));
+    // Starts small and pops up to full size (the wobble code eases the scale back to 1).
+    this.skins.set(id, this.add.image(dot.x, dot.y, `prop_${pt.id}`).setDepth(5).setRotation(turn).setScale(wasReady ? 0.55 : 1));
     if (isMe) {
       // A thin green ring so you can still find yourself among the lookalikes.
       this.selfRing = this.add.circle(dot.x, dot.y, Math.max(pt.w, pt.h) / 2 + 5).setStrokeStyle(2, 0x4ade80).setDepth(4);
@@ -172,6 +190,8 @@ export class GameScene extends Phaser.Scene {
       this.skinReady.delete(id);
       this.lastPos.delete(id);
       this.stepAcc.delete(id);
+      this.walkPhase.delete(id);
+      this.idleFrames.delete(id);
       if (id === room.sessionId) this.selfRing?.destroy();
     });
     room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
@@ -179,6 +199,26 @@ export class GameScene extends Phaser.Scene {
     room.onLeave(() => {
       this.connected = false;
     });
+  }
+
+  /** A little puff of round particles. Used for dust, sparks and pops. */
+  private burst(x: number, y: number, color: number, count: number, speed: number, life: number, size: number, alpha: number) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = speed * (0.5 + Math.random() * 0.8);
+      const t = life * (0.7 + Math.random() * 0.6);
+      const dot = this.add.circle(x, y, size * (0.6 + Math.random() * 0.8), color, alpha).setDepth(8);
+      this.tweens.add({
+        targets: dot,
+        x: x + Math.cos(a) * v * (t / 1000),
+        y: y + Math.sin(a) * v * (t / 1000),
+        alpha: 0,
+        scale: 0.2,
+        duration: t,
+        ease: "Quad.easeOut",
+        onComplete: () => dot.destroy(),
+      });
+    }
   }
 
   /** The hunter hears and sees roughly where a moving prop is. */
@@ -195,7 +235,7 @@ export class GameScene extends Phaser.Scene {
     // The "dot" is an invisible anchor: it holds the position that everything else follows.
     const dot = this.add.circle(b.x, b.y, PLAYER_RADIUS).setVisible(false);
     this.sprites.set(id, dot);
-    this.chars.set(id, this.add.image(b.x, b.y, "char_0").setDepth(5));
+    this.chars.set(id, this.add.image(b.x, b.y, "char_0_0").setDepth(5));
     this.lastPos.set(id, { x: b.x, y: b.y });
     if (isMe) this.cameras.main.startFollow(dot, true, 0.15, 0.15);
   }
@@ -242,6 +282,15 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: slash, alpha: 0, duration: 200, onComplete: () => slash.destroy() });
     }
 
+    if (e.result === "player") {
+      this.burst(e.x, e.y, 0x7cf5a0, 16, 120, 650, 3.4, 0.95);
+      this.burst(e.x, e.y, 0xfff1a6, 8, 90, 550, 2.6, 0.95);
+    } else if (e.result === "prop") {
+      this.burst(e.x, e.y, 0xff7a6a, 10, 100, 500, 3, 0.9);
+      this.burst(e.x, e.y, 0xb8b8c0, 8, 70, 480, 2.4, 0.8);
+    } else {
+      this.burst(e.x, e.y, 0xd0d0d8, 4, 40, 300, 2, 0.5);
+    }
     const color = e.result === "player" ? 0x4ade80 : e.result === "prop" ? 0xef4444 : 0xaaaaaa;
     const ring = this.add.circle(e.x, e.y, 8).setStrokeStyle(3, color).setDepth(70);
     this.tweens.add({ targets: ring, radius: 30, alpha: 0, duration: 300, onComplete: () => ring.destroy() });
@@ -267,8 +316,6 @@ export class GameScene extends Phaser.Scene {
     const ghost = !p.alive || p.role === "spectator";
     const char = this.chars.get(id);
     if (!char) return;
-    const key = charKey(p.role, id);
-    if (char.texture.key !== key) char.setTexture(key);
     // The hunter never sees ghosts; everyone else sees them faintly.
     const hidden = ghost && myRole === "hunter";
     const skin = this.skins.get(id);
@@ -302,6 +349,15 @@ export class GameScene extends Phaser.Scene {
       const moved = Math.hypot(dot.x - last.x, dot.y - last.y);
       this.lastPos.set(id, { x: dot.x, y: dot.y });
 
+      // Walking animation: swap between two step poses as they travel, standing when still.
+      const idle = moved < 0.2 ? (this.idleFrames.get(id) ?? 0) + 1 : 0;
+      this.idleFrames.set(id, idle);
+      const phase = (this.walkPhase.get(id) ?? 0) + (moved < 60 ? moved : 0);
+      this.walkPhase.set(id, phase);
+      const pose = idle > 6 ? 0 : 1 + (Math.floor(phase / 14) % 2);
+      const tex = `${charKey(info.role, id)}_${pose}`;
+      if (img.texture.key !== tex) img.setTexture(tex);
+
       // The hunter faces the mouse; everyone else faces the way they walk.
       if (id === myId && me.role === "hunter" && state.phase === "hunt") {
         const ptr = this.input.activePointer;
@@ -322,8 +378,13 @@ export class GameScene extends Phaser.Scene {
       if (vol < 0.05) return;
       const body = state.bodies.get(id);
       // A prop dragging itself around makes a scraping noise: another tell.
-      if (body?.disguise) this.sfx.scrape(vol, pan);
-      else this.sfx.step(vol, pan);
+      if (body?.disguise) {
+        this.sfx.scrape(vol, pan);
+        this.burst(dot.x, dot.y + 6, 0xb9a98a, 2, 22, 380, 2.2, 0.5);
+      } else {
+        this.sfx.step(vol, pan);
+        this.burst(dot.x, dot.y + 8, 0xcfd3dc, 2, 16, 320, 1.8, 0.35);
+      }
     });
   }
 
@@ -515,6 +576,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.update({
       connected: true,
       round: state.round,
+      fraction: phase === "hide" ? state.timeLeft / HIDE_TIME : phase === "hunt" ? state.timeLeft / HUNT_TIME : -1,
       phase,
       timeLeft: state.timeLeft,
       winner: state.winner,

@@ -612,26 +612,83 @@ export function jacketColor(key: string): number {
   return JACKETS[Number(key.slice(5))] ?? 0xffffff;
 }
 
-/** Little people seen from above, facing right (they are rotated in game). */
+/**
+ * Little people seen from above, facing right (they are rotated in game).
+ * Three poses each: standing (_0) and two steps (_1, _2) that swing arms and feet.
+ */
 export function makeCharacterTextures(scene: Phaser.Scene) {
-  const draw = (key: string, jacket: number, hunter: boolean) => {
+  const draw = (key: string, jacket: number, hunter: boolean, pose: 0 | 1 | 2) => {
     const g = scene.make.graphics({ x: 0, y: 0 }, false);
     const cx = CHAR_SIZE / 2;
     const cy = CHAR_SIZE / 2;
+    // Which hand / foot is forward in this pose.
+    const swing = pose === 0 ? 0 : pose === 1 ? 1 : -1;
     g.fillStyle(0x000000, 0.28).fillEllipse(cx + 1, cy + 3, 24, 28); // shadow
+    g.fillStyle(0x2a2a32).fillEllipse(cx + 7 + swing * 4, cy - 4.5, 7, 4.5).fillEllipse(cx + 7 - swing * 4, cy + 4.5, 7, 4.5); // feet
     g.fillStyle(dark(jacket, 0.25)).fillEllipse(cx - 1, cy, 15, 28); // shoulders (outline)
     g.fillStyle(jacket).fillEllipse(cx - 1, cy, 13, 26);
-    g.fillStyle(0xf1c9a5).fillCircle(cx + 4, cy - 11, 3.2).fillCircle(cx + 4, cy + 11, 3.2); // hands
+    g.fillStyle(0xf1c9a5).fillCircle(cx + 4 - swing * 3, cy - 11, 3.2).fillCircle(cx + 4 + swing * 3, cy + 11, 3.2); // hands
     if (hunter) {
-      g.fillStyle(0x3a3f4a).fillRoundedRect(cx + 5, cy + 9, 12, 4, 1); // flashlight
-      g.fillStyle(0xfff2b0).fillRect(cx + 16, cy + 9, 2.5, 4);
+      g.fillStyle(0x3a3f4a).fillRoundedRect(cx + 5 + swing * 3, cy + 9, 12, 4, 1); // flashlight
+      g.fillStyle(0xfff2b0).fillRect(cx + 16 + swing * 3, cy + 9, 2.5, 4);
     }
     g.fillStyle(hunter ? 0x7a1f1f : 0x5a3a24).fillCircle(cx, cy, 8.2); // hair / cap
     g.fillStyle(0xf1c9a5).fillCircle(cx + 2.2, cy, 6.4); // face
     if (hunter) g.fillStyle(0x4a1313).fillRoundedRect(cx + 5, cy - 5, 6, 10, 2); // cap brim
-    g.generateTexture(key, CHAR_SIZE, CHAR_SIZE);
+    g.generateTexture(`${key}_${pose}`, CHAR_SIZE, CHAR_SIZE);
     g.destroy();
   };
-  JACKETS.forEach((c, i) => draw(`char_${i}`, c, false));
-  draw("char_hunter", 0xd83a3a, true);
+  for (const pose of [0, 1, 2] as const) {
+    JACKETS.forEach((c, i) => draw(`char_${i}`, c, false, pose));
+    draw("char_hunter", 0xd83a3a, true, pose);
+  }
+}
+
+// ------------------------------------------------------------------------ lighting
+
+/** Soft round glow and a screen-edge vignette, drawn once. */
+export function makeLightTextures(scene: Phaser.Scene) {
+  const glow = scene.textures.createCanvas("glow", 128, 128);
+  if (glow) {
+    const ctx = glow.getContext();
+    const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.35, "rgba(255,255,255,0.45)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 128);
+    glow.refresh();
+  }
+  const vig = scene.textures.createCanvas("vignette", 256, 256);
+  if (vig) {
+    const ctx = vig.getContext();
+    const grad = ctx.createRadialGradient(128, 128, 70, 128, 128, 182);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, "rgba(5,6,12,0.7)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 256);
+    vig.refresh();
+  }
+}
+
+/** Lamps glow warmly, TVs and monitors glow blue. They flicker very slightly. */
+export function placeLights(scene: Phaser.Scene) {
+  const add = (x: number, y: number, color: number, size: number, alpha: number) => {
+    const img = scene.add.image(x, y, "glow").setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(2.6).setAlpha(alpha);
+    img.setDisplaySize(size, size);
+    scene.tweens.add({
+      targets: img,
+      alpha: alpha * (0.82 + Math.random() * 0.1),
+      duration: 1400 + Math.random() * 1600,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+      delay: Math.random() * 1500,
+    });
+  };
+  for (const p of PLACED_PROPS) {
+    if (p.type === "lamp") add(p.x, p.y, 0xffc66b, 190, 0.42);
+    else if (p.type === "tv_stand") add(p.x, p.y + 30, 0x7fb4ff, 220, 0.28);
+    else if (p.type === "desk") add(p.x, p.y - 4, 0x8fc4ff, 80, 0.2);
+  }
 }

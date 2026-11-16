@@ -23,6 +23,8 @@ export class Hud {
   private prompt: Phaser.GameObjects.Text;
   private note: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text;
+  private timerBack: Phaser.GameObjects.Rectangle;
+  private timerFill: Phaser.GameObjects.Rectangle;
   private boardBg: Phaser.GameObjects.Rectangle;
   private boardTitle: Phaser.GameObjects.Text;
   private boardRows: Phaser.GameObjects.Text[];
@@ -38,6 +40,8 @@ export class Hud {
     this.hpBack = scene.add.rectangle(0, 0, 200, 14, 0x000000, 0.6).setOrigin(1, 0).setScrollFactor(0).setDepth(d).setVisible(false);
     this.hpFill = scene.add.rectangle(0, 0, 200, 14, 0xef4444).setOrigin(1, 0).setScrollFactor(0).setDepth(d + 1).setVisible(false);
     this.hpLabel = text(13).setOrigin(1, 0).setVisible(false);
+    this.timerBack = scene.add.rectangle(0, 0, 320, 6, 0x000000, 0.55).setScrollFactor(0).setDepth(d).setVisible(false);
+    this.timerFill = scene.add.rectangle(0, 0, 320, 6, 0x4ade80).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d + 1).setVisible(false);
     this.boardBg = scene.add.rectangle(0, 0, 440, 200, 0x000000, 0.72).setScrollFactor(0).setDepth(d + 2).setVisible(false);
     this.boardTitle = text(22).setOrigin(0.5, 0).setDepth(d + 3).setVisible(false);
     this.boardRows = [0, 1, 2, 3].map(() =>
@@ -113,6 +117,8 @@ export class Hud {
     playerCount: number;
     propsLeft: number;
     round?: number;
+    /** Share of the phase time left (0 to 1), or below 0 for no bar. */
+    fraction?: number;
   }) {
     const { width, height } = this.scene.scale;
     this.title.setPosition(width / 2, 12);
@@ -158,6 +164,16 @@ export class Hud {
     this.title.setText(title).setVisible(title !== "");
     this.sub.setText(sub).setVisible(sub !== "");
     this.hint.setText(hint);
+
+    // Time bar under the title: green, then yellow, then red as time runs out.
+    const f = info.fraction ?? -1;
+    const showBar = f >= 0 && (info.phase === "hide" || info.phase === "hunt");
+    this.timerBack.setVisible(showBar).setPosition(width / 2, 80);
+    this.timerFill
+      .setVisible(showBar)
+      .setPosition(width / 2 - 160, 80)
+      .setSize(Math.max(1, 320 * Math.min(1, f)), 6)
+      .setFillStyle(f > 0.4 ? 0x4ade80 : f > 0.15 ? 0xfacc15 : 0xef4444);
 
     // Hunter health
     const showHp = isHunter && (info.phase === "hide" || info.phase === "hunt");
