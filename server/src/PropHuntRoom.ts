@@ -8,8 +8,9 @@ import {
   TICK_RATE,
   PLAYER_SPEED,
   PLAYER_RADIUS,
-  WORLD_WIDTH,
-  WORLD_HEIGHT,
+  ROOMS,
+  roomCenter,
+  moveWithCollision,
 } from "@prop-hunt/shared";
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -39,8 +40,11 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.id = client.sessionId;
     player.name = `Player ${this.clients.length}`;
     player.role = "prop";
-    player.x = WORLD_WIDTH / 2 + (Math.random() - 0.5) * 200;
-    player.y = WORLD_HEIGHT / 2 + (Math.random() - 0.5) * 200;
+    // Start in a random room, nudged so players don't stack exactly.
+    const room = ROOMS[Math.floor(Math.random() * ROOMS.length)]!;
+    const c = roomCenter(room);
+    player.x = c.x + (Math.random() - 0.5) * 80;
+    player.y = c.y + (Math.random() - 0.5) * 80;
     this.state.players.set(client.sessionId, player);
   }
 
@@ -55,8 +59,10 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!input || (input.dx === 0 && input.dy === 0)) return;
       // Normalise so diagonal movement isn't faster.
       const len = Math.hypot(input.dx, input.dy);
-      player.x = clamp(player.x + (input.dx / len) * PLAYER_SPEED * dt, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
-      player.y = clamp(player.y + (input.dy / len) * PLAYER_SPEED * dt, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+      const step = PLAYER_SPEED * dt;
+      const next = moveWithCollision(player.x, player.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
+      player.x = next.x;
+      player.y = next.y;
     });
   }
 }

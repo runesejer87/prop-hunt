@@ -6,6 +6,12 @@ import {
   MSG_INPUT,
   WORLD_WIDTH,
   WORLD_HEIGHT,
+  TILE,
+  ROOMS,
+  isWallTile,
+  MAP_COLS,
+  MAP_ROWS,
+  moveWithCollision,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   GameState,
@@ -25,7 +31,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    this.add.rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT, 0x2a2e38).setOrigin(0);
+    this.drawMap();
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -33,6 +39,53 @@ export class GameScene extends Phaser.Scene {
 
     this.status = this.add.text(12, 12, "Connecting…", { color: "#fff" }).setScrollFactor(0).setDepth(100);
     void this.connect();
+  }
+
+  /** Draw floors, walls and room names once. */
+  private drawMap() {
+    const g = this.add.graphics().setDepth(0);
+    g.fillStyle(0x15171c).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+    for (const room of ROOMS) {
+      g.fillStyle(room.color).fillRect(room.x * TILE, room.y * TILE, room.w * TILE, room.h * TILE);
+    }
+    // Doorways and corridors are floor tiles outside any room: give them a neutral colour.
+    g.fillStyle(0x3a3a40);
+    for (let row = 0; row < MAP_ROWS; row++) {
+      for (let col = 0; col < MAP_COLS; col++) {
+        if (isWallTile(col, row)) continue;
+        const inRoom = ROOMS.some((r) => col >= r.x && col < r.x + r.w && row >= r.y && row < r.y + r.h);
+        if (!inRoom) g.fillRect(col * TILE, row * TILE, TILE, TILE);
+      }
+    }
+
+    // Subtle floor grid
+    g.lineStyle(1, 0x000000, 0.12);
+    for (let col = 0; col <= MAP_COLS; col++) g.lineBetween(col * TILE, 0, col * TILE, WORLD_HEIGHT);
+    for (let row = 0; row <= MAP_ROWS; row++) g.lineBetween(0, row * TILE, WORLD_WIDTH, row * TILE);
+
+    // Walls: only draw ones touching a floor tile, with a lighter edge.
+    for (let row = 0; row < MAP_ROWS; row++) {
+      for (let col = 0; col < MAP_COLS; col++) {
+        if (!isWallTile(col, row)) continue;
+        const nearFloor = [-1, 0, 1].some((dj) => [-1, 0, 1].some((di) => !isWallTile(col + di, row + dj)));
+        if (!nearFloor) continue;
+        g.fillStyle(0x23252c).fillRect(col * TILE, row * TILE, TILE, TILE);
+        g.fillStyle(0x5a5f6b).fillRect(col * TILE, row * TILE, TILE, 3);
+      }
+    }
+
+    for (const room of ROOMS) {
+      this.add
+        .text((room.x + room.w / 2) * TILE, (room.y + 0.6) * TILE, room.name.toUpperCase(), {
+          fontFamily: "sans-serif",
+          fontSize: "14px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5, 0)
+        .setAlpha(0.35)
+        .setDepth(1);
+    }
   }
 
   private async connect() {
@@ -90,8 +143,8 @@ export class GameScene extends Phaser.Scene {
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
         const step = (PLAYER_SPEED * delta) / 1000;
-        dot.x = Phaser.Math.Clamp(dot.x + (dx / len) * step, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
-        dot.y = Phaser.Math.Clamp(dot.y + (dy / len) * step, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+        const next = moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
+        dot.setPosition(next.x, next.y);
       }
 
       // Correct drift toward the server's version of events.

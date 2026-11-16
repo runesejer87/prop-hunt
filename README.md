@@ -23,8 +23,8 @@ The server runs on port 2567.
 - `npm run build` – build the client for production
 
 ## Status
-Base only: players join a room and move around an empty map.
-Next: rooms/map, props to disguise as, hunter role + vision circle, round timer.
+Done: players join a room and move around a map of 9 rooms with walls and doors (shared/src/map.ts).
+Next: props to disguise as, hunter role + vision circle, round timer.
 
 ## Hosting (Vercel)
 Two Vercel projects from this repo:

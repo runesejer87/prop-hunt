@@ -1,5 +1,7 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
 
+export * from "./map.ts";
+
 /** Name used when joining the game room. */
 export const ROOM_NAME = "prop_hunt";
 export const SERVER_PORT = 2567;
@@ -10,10 +12,6 @@ export const MAX_PLAYERS = 4;
 
 /** Server simulation rate (updates per second). */
 export const TICK_RATE = 30;
-
-/** World size in pixels (placeholder until the real room map exists). */
-export const WORLD_WIDTH = 1600;
-export const WORLD_HEIGHT = 1200;
 
 /** Movement speed in pixels per second. */
 export const PLAYER_SPEED = 180;
