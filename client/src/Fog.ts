@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { VISION_RADIUS, Sight } from "@prop-hunt/shared";
+import { VISION_RADIUS, Sight, type GameMap } from "@prop-hunt/shared";
 
 const FADE = 60; // width of the soft edge, pixels; it is fully dark at VISION_RADIUS
 const HALF = VISION_RADIUS;
@@ -19,13 +19,22 @@ export class Fog {
   private rects: Phaser.GameObjects.Rectangle[];
   private blackout: Phaser.GameObjects.Rectangle;
 
-  constructor(private scene: Phaser.Scene, private worldW: number, private worldH: number) {
+  private worldW = 1;
+  private worldH = 1;
+
+  constructor(private scene: Phaser.Scene) {
     this.canvasTex = scene.textures.createCanvas("fog_view", SIZE, SIZE)!;
     this.ctx = this.canvasTex.getContext();
     this.image = scene.add.image(0, 0, "fog_view").setDepth(50).setVisible(false);
     this.rects = [0, 1, 2, 3].map(() => scene.add.rectangle(0, 0, 1, 1, 0x000000, 1).setOrigin(0).setDepth(50).setVisible(false));
     // Total darkness (hunter waiting while props hide). Sits on screen, not in the world.
     this.blackout = scene.add.rectangle(0, 0, 1, 1, 0x000000, 1).setOrigin(0).setScrollFactor(0).setDepth(50).setVisible(false);
+  }
+
+  /** Tell the fog how big the world is (it changes with the map). */
+  setWorld(width: number, height: number) {
+    this.worldW = width;
+    this.worldH = height;
   }
 
   /** Total darkness. */
@@ -36,7 +45,7 @@ export class Fog {
   }
 
   /** What the hunter at (x, y) can see; everything else goes black. */
-  see(x: number, y: number) {
+  see(x: number, y: number, map: GameMap) {
     this.blackout.setVisible(false);
 
     // Snap the canvas to whole pixels so the edges stay sharp.
@@ -45,7 +54,7 @@ export class Fog {
     const left = ox - HALF;
     const top = oy - HALF;
 
-    const sight = new Sight(x, y, HALF);
+    const sight = new Sight(map, x, y, HALF);
     const ctx = this.ctx;
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, SIZE, SIZE);

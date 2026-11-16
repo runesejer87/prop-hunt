@@ -1,8 +1,8 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
 
-export * from "./map.ts";
+export * from "./mapdef.ts";
 export * from "./props.ts";
-export * from "./collision.ts";
+export * from "./gamemap.ts";
 export * from "./vision.ts";
 
 /** Name used when joining the game room. */
@@ -127,6 +127,8 @@ export const GameState = schema(
     winner: t.string(),
     /** How many rounds have started so far. */
     round: t.number(),
+    /** Id of the map in play (see MAP_DEFS). It changes between rounds. */
+    map: t.string(),
   },
   "GameState",
 );

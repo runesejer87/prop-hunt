@@ -22,10 +22,9 @@ import {
   HUNT_TIME,
   Sight,
   PROP_TYPES,
-  nearestDisguisableProp,
-  WORLD_WIDTH,
-  WORLD_HEIGHT,
-  moveWithCollision,
+  getMap,
+  DEFAULT_MAP_ID,
+  type GameMap,
   PLAYER_RADIUS,
   moveSpeed,
   type GameState,
@@ -70,6 +69,11 @@ export class GameScene extends Phaser.Scene {
   private prevSettled = false;
 
   private initialRoom!: Room<any, GameState>;
+  private map!: GameMap;
+  private mapId = "";
+  /** Everything drawn for the current map, so it can be swapped out when the map changes. */
+  private worldObjects: Phaser.GameObjects.GameObject[] = [];
+  private lightImages: Phaser.GameObjects.Image[] = [];
 
   constructor() {
     super("GameScene");
@@ -84,10 +88,8 @@ export class GameScene extends Phaser.Scene {
     makePropTextures(this);
     makeCharacterTextures(this);
     makeLightTextures(this);
-    drawWorld(this);
-    placeProps(this);
-    placeLights(this);
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.fog = new Fog(this);
+    this.buildWorld(this.initialRoom.state.map || DEFAULT_MAP_ID);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as typeof this.wasd;
@@ -114,12 +116,42 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: this.cameras.main, zoom: 1, duration: 900, ease: "Cubic.easeOut" });
 
     this.hud = new Hud(this);
-    this.fog = new Fog(this, WORLD_WIDTH, WORLD_HEIGHT);
     this.reticle = this.add.graphics().setDepth(60);
     // Props can see exactly what the hunter can see (a faint red glow on the floor).
     this.hunterView = this.add.graphics().setDepth(3);
     this.input.on("pointerdown", () => this.swing());
     this.attach(this.initialRoom);
+  }
+
+  /** Draw the map: floors, walls, furniture, lights. Replaces the previous map if there was one. */
+  private buildWorld(mapId: string) {
+    // Remove the old map.
+    for (const img of this.lightImages) this.tweens.killTweensOf(img);
+    this.lightImages = [];
+    for (const obj of this.worldObjects) obj.destroy();
+    this.worldObjects = [];
+
+    this.map = getMap(mapId);
+    this.mapId = this.map.id;
+
+    const before = new Set(this.children.list);
+    drawWorld(this, this.map);
+    placeProps(this, this.map);
+    placeLights(this, this.map);
+    for (const obj of this.children.list) {
+      if (!before.has(obj)) {
+        this.worldObjects.push(obj);
+        if (obj instanceof Phaser.GameObjects.Image && obj.texture.key === "glow") this.lightImages.push(obj);
+      }
+    }
+
+    this.cameras.main.setBounds(0, 0, this.map.width, this.map.height);
+    this.fog.setWorld(this.map.width, this.map.height);
+    // Everyone has been moved to the new map: jump straight to their new spots.
+    this.room?.state.bodies.forEach((b: BodyState, id: string) => {
+      this.sprites.get(id)?.setPosition(b.x, b.y);
+      this.lastPos.set(id, { x: b.x, y: b.y });
+    });
   }
 
   /** How loud and how far left/right a sound at (x, y) is for me. */
@@ -443,6 +475,7 @@ export class GameScene extends Phaser.Scene {
       this.hud.update({ connected: this.connected || !room, phase: "", timeLeft: 0, winner: "", role: "", alive: true, hp: 0, playerCount: 0, propsLeft: 0 });
       return;
     }
+    if (state.map && state.map !== this.mapId) this.buildWorld(state.map);
     const phase = state.phase;
     const myDot = this.sprites.get(room.sessionId);
     const iAmHunter = me.role === "hunter";
@@ -487,7 +520,7 @@ export class GameScene extends Phaser.Scene {
       if (dx !== 0 || dy !== 0) {
         const len = Math.hypot(dx, dy);
         const step = (moveSpeed(me.role, !!myBody.disguise) * delta) / 1000;
-        const next = moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
+        const next = this.map.moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
         dot.setPosition(next.x, next.y);
       }
 
@@ -530,7 +563,7 @@ export class GameScene extends Phaser.Scene {
     this.reticle.clear();
     if (iAmHunter && myDot && (phase === "hide" || phase === "hunt")) {
       if (phase === "hide") this.fog.blind();
-      else this.fog.see(myDot.x, myDot.y);
+      else this.fog.see(myDot.x, myDot.y, this.map);
       if (phase === "hunt") {
         const ptr = this.input.activePointer;
         const d = Math.hypot(ptr.worldX - myDot.x, ptr.worldY - myDot.y) || 1;
@@ -558,7 +591,7 @@ export class GameScene extends Phaser.Scene {
       const hx = hunterDot.x;
       const hy = hunterDot.y;
       // Pull far corners in to the vision circle.
-      const pts = new Sight(hx, hy, VISION_RADIUS).polygon().map((q) => {
+      const pts = new Sight(this.map, hx, hy, VISION_RADIUS).polygon().map((q) => {
         const d = Math.hypot(q.x - hx, q.y - hy);
         const k = d > VISION_RADIUS ? VISION_RADIUS / d : 1;
         return new Phaser.Math.Vector2(hx + (q.x - hx) * k, hy + (q.y - hy) * k);
@@ -570,7 +603,7 @@ export class GameScene extends Phaser.Scene {
     // Prompt to copy a nearby object (props only).
     let prompt: string | null = null;
     if (myDot && me.role === "prop" && me.alive && phase !== "end") {
-      const near = nearestDisguisableProp(myDot.x, myDot.y);
+      const near = this.map.nearestDisguisableProp(myDot.x, myDot.y);
       if (near && near.type !== myBody.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
     }
     this.hud.setPrompt(prompt);
@@ -600,6 +633,7 @@ export class GameScene extends Phaser.Scene {
     this.hud.update({
       connected: true,
       round: state.round,
+      mapName: this.map.name,
       fraction: phase === "hide" ? state.timeLeft / HIDE_TIME : phase === "hunt" ? state.timeLeft / HUNT_TIME : -1,
       phase,
       timeLeft: state.timeLeft,

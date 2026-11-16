@@ -1,5 +1,4 @@
-import { TILE, isWallTile } from "./map.ts";
-import { PLACED_PROPS, PROP_TYPES, footprint } from "./props.ts";
+import { TILE, type GameMap } from "./gamemap.ts";
 
 export interface Point {
   x: number;
@@ -22,12 +21,6 @@ interface Segment {
   bx: number;
   by: number;
 }
-
-/** Large furniture blocks sight; small objects (the ones you can copy) do not. */
-const BIG_PROPS = PLACED_PROPS.filter((p) => !PROP_TYPES[p.type]!.disguisable).map((p) => {
-  const { w, h } = footprint(p.type, p.rot);
-  return { x: p.x - w / 2, y: p.y - h / 2, w, h };
-});
 
 const OUT = 1.5; // how far outside a face a sample point sits, in pixels
 
@@ -70,6 +63,7 @@ export class Sight {
   private segments: Segment[] = [];
 
   constructor(
+    readonly map: GameMap,
     readonly ox: number,
     readonly oy: number,
     readonly radius: number,
@@ -83,20 +77,20 @@ export class Sight {
     // Wall tiles: only the faces that touch open floor matter.
     for (let row = r0; row <= r1; row++) {
       for (let col = c0; col <= c1; col++) {
-        if (!isWallTile(col, row)) continue;
+        if (!map.isWallTile(col, row)) continue;
         const x = col * TILE;
         const y = row * TILE;
         const open: (typeof SIDES)[number][] = [];
-        if (!isWallTile(col, row - 1)) open.push("top");
-        if (!isWallTile(col, row + 1)) open.push("bottom");
-        if (!isWallTile(col - 1, row)) open.push("left");
-        if (!isWallTile(col + 1, row)) open.push("right");
+        if (!map.isWallTile(col, row - 1)) open.push("top");
+        if (!map.isWallTile(col, row + 1)) open.push("bottom");
+        if (!map.isWallTile(col - 1, row)) open.push("left");
+        if (!map.isWallTile(col + 1, row)) open.push("right");
         if (open.length === 0) continue;
         this.add(x, y, TILE, TILE, open);
       }
     }
     // Big furniture: all four faces.
-    for (const b of BIG_PROPS) {
+    for (const b of map.bigProps) {
       if (b.x > ox + r || b.x + b.w < ox - r || b.y > oy + r || b.y + b.h < oy - r) continue;
       this.add(b.x, b.y, b.w, b.h, SIDES);
     }

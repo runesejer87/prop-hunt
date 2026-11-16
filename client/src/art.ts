@@ -6,16 +6,10 @@
  */
 import Phaser from "phaser";
 import {
-  ROOMS,
   TILE,
-  MAP_COLS,
-  MAP_ROWS,
-  WORLD_WIDTH,
-  WORLD_HEIGHT,
-  isWallTile,
-  roomIndexAt,
   PROP_TYPES,
-  PLACED_PROPS,
+  type GameMap,
+  type FloorKind,
   type PropType,
 } from "@prop-hunt/shared";
 
@@ -49,20 +43,6 @@ function rng(seed: number) {
 }
 
 // ------------------------------------------------------------------------- floors
-
-type FloorKind = "wood" | "tile" | "smalltile" | "carpet" | "concrete";
-
-const FLOOR_KIND: Record<string, FloorKind> = {
-  Kitchen: "tile",
-  "Living Room": "wood",
-  Bedroom: "carpet",
-  Bathroom: "smalltile",
-  Hallway: "wood",
-  Study: "wood",
-  Garage: "concrete",
-  Library: "carpet",
-  Storage: "concrete",
-};
 
 function paintFloor(ctx: CanvasRenderingContext2D, kind: FloorKind, base: number, seed: number) {
   const r = rng(seed);
@@ -146,20 +126,25 @@ function paintFloor(ctx: CanvasRenderingContext2D, kind: FloorKind, base: number
 // --------------------------------------------------------------------------- world
 
 /** Floors, rugs, wall shadows, walls and room names. Drawn once. */
-export function drawWorld(scene: Phaser.Scene) {
+export function drawWorld(scene: Phaser.Scene, map: GameMap) {
+  const { rooms, cols: MAP_COLS, rows: MAP_ROWS } = map;
+  const isWallTile = (c: number, r: number) => map.isWallTile(c, r);
+  const roomIndexAt = (c: number, r: number) => map.roomIndexAt(c, r);
   // Floors: one tiling picture per room, tinted by the room's colour.
-  ROOMS.forEach((room, i) => {
-    const key = `floor_${i}`;
-    const tex = scene.textures.createCanvas(key, 64, 64);
-    if (tex) {
-      paintFloor(tex.getContext(), FLOOR_KIND[room.name] ?? "wood", room.color, 100 + i);
-      tex.refresh();
-      scene.add.tileSprite(room.x * TILE, room.y * TILE, room.w * TILE, room.h * TILE, key).setOrigin(0).setDepth(0);
+  rooms.forEach((room, i) => {
+    const key = `floor_${map.id}_${i}`;
+    if (!scene.textures.exists(key)) {
+      const tex = scene.textures.createCanvas(key, 64, 64);
+      if (tex) {
+        paintFloor(tex.getContext(), room.floor as FloorKind, room.color, 100 + i);
+        tex.refresh();
+      }
     }
+    scene.add.tileSprite(room.x * TILE, room.y * TILE, room.w * TILE, room.h * TILE, key).setOrigin(0).setDepth(0);
   });
 
   // Dark backdrop behind everything (the area outside the walls).
-  scene.add.graphics().setDepth(-1).fillStyle(0x15171c).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+  scene.add.graphics().setDepth(-1).fillStyle(0x15171c).fillRect(0, 0, map.width, map.height);
 
   const g = scene.add.graphics().setDepth(0.5);
 
@@ -180,16 +165,7 @@ export function drawWorld(scene: Phaser.Scene) {
   }
 
   // Rugs and mats, each under a furniture group.
-  const RUGS: { x: number; y: number; w: number; h: number; color: number }[] = [
-    { x: 768, y: 164, w: 300, h: 176, color: 0x8a4a3a }, // living room, under the sofa and coffee table
-    { x: 1280, y: 206, w: 236, h: 150, color: 0x5a6e92 }, // bedroom, beside the bed
-    { x: 768, y: 852, w: 270, h: 140, color: 0x7a3a4a }, // library reading corner
-    { x: 1360, y: 424, w: 140, h: 84, color: 0x6a5a8a }, // study, under the desk chair
-    { x: 768, y: 496, w: 660, h: 64, color: 0x8a3a3a }, // hallway runner
-    { x: 290, y: 190, w: 160, h: 104, color: 0xb0a070 }, // kitchen mat under the table
-    { x: 110, y: 572, w: 84, h: 30, color: 0x6a9ab8 }, // bath mat
-  ];
-  for (const rug of RUGS) {
+  for (const rug of map.def.rugs) {
     const x = rug.x - rug.w / 2;
     const y = rug.y - rug.h / 2;
     const c = rug.color;
@@ -243,19 +219,8 @@ export function drawWorld(scene: Phaser.Scene) {
   }
 
   // Room names, written on the floor where nothing stands.
-  const LABELS: Record<string, [number, number]> = {
-    Kitchen: [250, 300],
-    "Living Room": [800, 298],
-    Bedroom: [1190, 262],
-    Bathroom: [180, 470],
-    Hallway: [768, 440],
-    Study: [1370, 520],
-    Garage: [320, 880],
-    Library: [768, 936],
-    Storage: [1410, 860],
-  };
-  for (const room of ROOMS) {
-    const [lx, ly] = LABELS[room.name] ?? [(room.x + room.w / 2) * TILE, (room.y + 1) * TILE];
+  for (const room of rooms) {
+    const [lx, ly] = map.def.labels[room.name] ?? [(room.x + room.w / 2) * TILE, (room.y + 1) * TILE];
     scene.add
       .text(lx, ly, room.name.toUpperCase(), { fontFamily: "sans-serif", fontSize: "14px", fontStyle: "bold", color: "#ffffff" })
       .setOrigin(0.5)
@@ -584,8 +549,8 @@ export function makePropTextures(scene: Phaser.Scene) {
 }
 
 /** Furniture and objects placed around the rooms, each with a soft shadow. */
-export function placeProps(scene: Phaser.Scene) {
-  for (const p of PLACED_PROPS) {
+export function placeProps(scene: Phaser.Scene, map: GameMap) {
+  for (const p of map.props) {
     const turn = (p.rot * Math.PI) / 2;
     if (!p.stacked) scene.add.image(p.x + 3, p.y + 4, `shadow_${p.type}`).setAlpha(0.3).setDepth(1.5).setRotation(turn);
     scene.add.image(p.x, p.y, `prop_${p.type}`).setDepth(p.stacked ? 2.2 : 2).setRotation(turn);
@@ -672,7 +637,7 @@ export function makeLightTextures(scene: Phaser.Scene) {
 }
 
 /** Lamps glow warmly, TVs and monitors glow blue. They flicker very slightly. */
-export function placeLights(scene: Phaser.Scene) {
+export function placeLights(scene: Phaser.Scene, map: GameMap) {
   const add = (x: number, y: number, color: number, size: number, alpha: number) => {
     const img = scene.add.image(x, y, "glow").setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(2.6).setAlpha(alpha);
     img.setDisplaySize(size, size);
@@ -686,7 +651,7 @@ export function placeLights(scene: Phaser.Scene) {
       delay: Math.random() * 1500,
     });
   };
-  for (const p of PLACED_PROPS) {
+  for (const p of map.props) {
     if (p.type === "lamp") add(p.x, p.y, 0xffc66b, 190, 0.42);
     else if (p.type === "tv_stand") add(p.x, p.y + 30, 0x7fb4ff, 220, 0.28);
     else if (p.type === "desk") add(p.x, p.y - 4, 0x8fc4ff, 80, 0.2);

@@ -139,6 +139,7 @@ export class Hud {
     playerCount: number;
     propsLeft: number;
     round?: number;
+    mapName?: string;
     /** Share of the phase time left (0 to 1), or below 0 for no bar. */
     fraction?: number;
   }) {
@@ -173,7 +174,7 @@ export class Hud {
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
-        sub = `Round ${info.round ?? 0}   ·   ${mmss}   ·   Props left: ${info.propsLeft}`;
+        sub = `Round ${info.round ?? 0} · ${info.mapName ?? ""}   ·   ${mmss}   ·   Props left: ${info.propsLeft}`;
         hint = isHunter
           ? "Click or Space: swing   F: radar   Yellow rings: something is moving   Tab: scores   M: sound"
           : "Don't run! Hide: E / Q / R, then hold still.   F: send the hunter a fake noise   Tab: scores   M: sound";

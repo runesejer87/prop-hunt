@@ -18,9 +18,10 @@ import {
   MSG_ATTACK,
   MSG_SWING,
   PROP_TYPES,
-  PLACED_PROPS,
-  nearestDisguisableProp,
-  isBlocked,
+  getMap,
+  MAP_IDS,
+  DEFAULT_MAP_ID,
+  type GameMap,
   MAX_PLAYERS,
   MIN_PLAYERS,
   TICK_RATE,
@@ -38,10 +39,7 @@ import {
   PING_INTERVAL,
   PING_JITTER,
   PLAYER_RADIUS,
-  ROOMS,
   TILE,
-  roomCenter,
-  moveWithCollision,
   LOBBY_COUNTDOWN,
   HIDE_TIME,
   HUNT_TIME,
@@ -67,6 +65,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   maxClients = MAX_PLAYERS;
   state = new GameState();
 
+  /** The map in play. It changes between rounds. */
+  private map: GameMap = getMap(DEFAULT_MAP_ID);
   /** Latest input per player; the server decides the real movement. */
   private moveInputs = new Map<string, InputMessage>();
   /** Seconds left (with decimals) in the current phase. */
@@ -92,7 +92,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const player = this.state.players.get(client.sessionId);
       const body = this.state.bodies.get(client.sessionId);
       if (!player || !body || player.role !== "prop" || !player.alive) return;
-      const prop = nearestDisguisableProp(body.x, body.y);
+      const prop = this.map.nearestDisguisableProp(body.x, body.y);
       if (prop && PROP_TYPES[prop.type]) {
         if (body.disguise !== prop.type || body.rot !== prop.rot) this.stillFor.set(client.sessionId, 0);
         body.disguise = prop.type;
@@ -130,6 +130,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   onCreate() {
     this.state.phase = "lobby";
+    this.state.map = this.map.id;
     this.state.timeLeft = 0;
     this.state.winner = "";
     this.state.round = 0;
@@ -196,7 +197,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!view || !me || !myBody) continue;
 
       const restricted = me.role === "hunter" && (phase === "hide" || phase === "hunt");
-      const sight = restricted && phase === "hunt" ? new Sight(myBody.x, myBody.y, VISION_RADIUS + REVEAL_MARGIN) : undefined;
+      const sight = restricted && phase === "hunt" ? new Sight(this.map, myBody.x, myBody.y, VISION_RADIUS + REVEAL_MARGIN) : undefined;
 
       this.state.bodies.forEach((body, id) => {
         let show = true;
@@ -256,6 +257,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const chosen = candidates[Math.floor(Math.random() * candidates.length)]!;
     this.hunts.set(chosen.id, fewest + 1);
     this.state.round += 1;
+    this.chooseNextMap();
     all.forEach((p) => {
       const body = this.state.bodies.get(p.id)!;
       p.gain = 0;
@@ -265,8 +267,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       this.clearDisguise(p.id, body);
       if (p.role === "hunter") {
         // The hunter starts in the middle of the hallway.
-        const hall = ROOMS.find((r) => r.name === "Hallway")!;
-        const c = roomCenter(hall);
+        const start = this.map.rooms.find((r) => r.name === this.map.def.hunterStart) ?? this.map.rooms[0]!;
+        const c = this.map.roomCenter(start);
         body.x = c.x;
         body.y = c.y;
         this.nudgeToFreeSpot(body);
@@ -278,6 +280,14 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     for (const p of all) this.setCooldown(p.id, 0);
     this.state.winner = "";
     this.setPhase("hide", HIDE_TIME);
+  }
+
+  /** A different map each round (when there is more than one). */
+  private chooseNextMap() {
+    const others = MAP_IDS.filter((id) => id !== this.map.id);
+    const next = others.length > 0 ? others[Math.floor(Math.random() * others.length)]! : this.map.id;
+    this.map = getMap(next);
+    this.state.map = this.map.id;
   }
 
   private endRound(winner: "props" | "hunter") {
@@ -379,7 +389,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!best || hit.d < best.d) best = hit;
     };
     const SLOP = 6;
-    for (const p of PLACED_PROPS) {
+    for (const p of this.map.props) {
       const fp = footprint(p.type, p.rot);
       if (Math.abs(ax - p.x) <= fp.w / 2 + SLOP && Math.abs(ay - p.y) <= fp.h / 2 + SLOP)
         consider({ kind: "prop", d: Math.hypot(ax - p.x, ay - p.y) });
@@ -444,7 +454,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       // Normalise so diagonal movement isn't faster.
       const len = Math.hypot(input.dx, input.dy);
       const step = moveSpeed(player.role, !!body.disguise) * dt;
-      const next = moveWithCollision(body.x, body.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
+      const next = this.map.moveWithCollision(body.x, body.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
       body.x = next.x;
       body.y = next.y;
     });
@@ -500,7 +510,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         const r = DISTRACT_MIN + Math.random() * (DISTRACT_MAX - DISTRACT_MIN);
         const x = body.x + Math.cos(a) * r;
         const y = body.y + Math.sin(a) * r;
-        if (isBlocked(x, y, PLAYER_RADIUS)) continue;
+        if (this.map.isBlocked(x, y, PLAYER_RADIUS)) continue;
         hunter.send(MSG_PING, { x, y, kind: "noise" } satisfies PingEvent);
         this.setCooldown(client.sessionId, DISTRACT_COOLDOWN);
         return;
@@ -520,14 +530,15 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   /** Put a body on a random open spot in a random room. */
   private placeRandomly(body: BodyState) {
-    const room = ROOMS[Math.floor(Math.random() * ROOMS.length)]!;
-    const c = roomCenter(room);
+    const rooms = this.map.rooms;
+    const room = rooms[Math.floor(Math.random() * rooms.length)]!;
+    const c = this.map.roomCenter(room);
     body.x = c.x;
     body.y = c.y;
     for (let i = 0; i < 200; i++) {
       const x = room.x * TILE + (1 + Math.random() * (room.w - 2)) * TILE;
       const y = room.y * TILE + (1 + Math.random() * (room.h - 2)) * TILE;
-      if (!isBlocked(x, y, PLAYER_RADIUS + 2)) {
+      if (!this.map.isBlocked(x, y, PLAYER_RADIUS + 2)) {
         body.x = x;
         body.y = y;
         return;
@@ -541,7 +552,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       for (let a = 0; a < 8; a++) {
         const x = body.x + Math.cos((a * Math.PI) / 4) * r;
         const y = body.y + Math.sin((a * Math.PI) / 4) * r;
-        if (!isBlocked(x, y, PLAYER_RADIUS + 2)) {
+        if (!this.map.isBlocked(x, y, PLAYER_RADIUS + 2)) {
           body.x = x;
           body.y = y;
           return;
