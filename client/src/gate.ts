@@ -1,5 +1,6 @@
 import { Client, type Room } from "@colyseus/sdk";
 import { ROOM_NAME, SERVER_PORT, MAX_NAME_LENGTH, GameState } from "@prop-hunt/shared";
+import { isTouchDevice } from "./Touch.ts";
 
 const PASSWORD_KEY = "prop-hunt-password";
 const NAME_KEY = "prop-hunt-name";
@@ -49,7 +50,7 @@ function titleScreen(firstMessage: string, needPassword: boolean): Promise<Room<
         <input id="gate-name" maxlength="${MAX_NAME_LENGTH}" autocomplete="nickname" placeholder="Your name" style="${field}" />
         <input id="gate-pw" type="password" autocomplete="current-password" placeholder="Password" style="${field};display:${needPassword ? "block" : "none"}" />
         <button id="gate-go" type="submit" style="padding:13px;font-size:17px;font-weight:700;border-radius:10px;border:0;background:#4ade80;color:#10261a;cursor:pointer">Play</button>
-        <div style="color:#7d8492;font-size:12px;line-height:1.5">2–4 players · WASD to move · E become an object · Q change back · R turn · hold still to blend in</div>
+        <div style="color:#7d8492;font-size:12px;line-height:1.5">${isTouchDevice() ? "2–4 players · left thumb moves · buttons on the right · hold still to blend in" : "2–4 players · WASD to move · E become an object · Q change back · R turn · hold still to blend in"}</div>
       </form>`;
     document.body.appendChild(gate);
     const form = gate.querySelector("form")!;

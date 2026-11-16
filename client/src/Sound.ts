@@ -198,6 +198,18 @@ export class Sound {
     this.tone(390, 0.1, { type: "square", gain: 0.05, delay: 0.09 });
   }
 
+  /** The hunter checked an object and it was just an object. */
+  inspectOk() {
+    this.tone(660, 0.1, { type: "triangle", gain: 0.12 });
+    this.tone(880, 0.16, { type: "triangle", gain: 0.12, delay: 0.09 });
+  }
+
+  /** A prop is being inspected: get away! */
+  alarm() {
+    this.tone(990, 0.12, { type: "square", gain: 0.1 });
+    this.tone(740, 0.12, { type: "square", gain: 0.1, delay: 0.13 });
+  }
+
   /** A countdown beep. `last` makes it higher and longer. */
   tick(last = false) {
     this.tone(last ? 880 : 520, last ? 0.28 : 0.1, { type: "square", gain: 0.1 });

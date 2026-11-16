@@ -40,6 +40,24 @@ export const RADAR_START_DELAY = 8;
 export const RADAR_RADIUS = 320;
 export const RADAR_JITTER = 24;
 
+/** Inspect (hold E as the hunter): check one object safely, at the cost of time instead of health. */
+export const INSPECT_TIME = 2;
+/** If the inspected player moves more than this (pixels) the inspection fails and reveals them. */
+export const INSPECT_MOVE_LIMIT = 18;
+
+/** The hunt tightens: seconds into the hunt when each level starts. */
+export const TIGHTEN_AT = [60, 120] as const;
+/** At levels 1 and 2, every prop gives a rough area ping this often (seconds)... */
+export const SWEEP_EVERY = [20, 10] as const;
+/** ...and the area it lands in has this radius (pixels). */
+export const SWEEP_RADIUS = [110, 64] as const;
+/** The radar recharges faster as the hunt tightens (index = level 0, 1, 2). */
+export const RADAR_COOLDOWN_BY_LEVEL = [25, 18, 12] as const;
+
+/** When a prop disguises or undisguises within this distance of the hunter, a dust puff shows nearby. */
+export const CLUE_RADIUS = 380;
+export const CLUE_JITTER = 40;
+
 /** A prop that keeps moving gives away roughly where it is every few seconds. */
 export const PING_INTERVAL = 2.5;
 /** How far (pixels) the revealed spot can be from the prop's real position. */
@@ -91,6 +109,8 @@ export const PlayerState = schema(
     gain: t.number(),
     /** Seconds until your ability (F) is ready again; 0 means ready. */
     cooldown: t.number(),
+    /** Hunter only: how far through an inspection (0 to 100). 0 when not inspecting. */
+    inspect: t.number(),
   },
   "PlayerState",
 );
@@ -129,6 +149,8 @@ export const GameState = schema(
     round: t.number(),
     /** Id of the map in play (see MAP_DEFS). It changes between rounds. */
     map: t.string(),
+    /** How far the hunt has tightened (0, 1 or 2). */
+    alert: t.number(),
   },
   "GameState",
 );
@@ -169,8 +191,37 @@ export const MSG_PING = "ping";
 export interface PingEvent {
   x: number;
   y: number;
-  /** "noise": a moving prop or a decoy (they look the same). "radar": found by the hunter's radar. "pulse": the radar sweep itself. */
-  kind: "noise" | "radar" | "pulse";
+  /**
+   * "noise": a moving prop or a decoy (they look the same). "radar": found by the hunter's radar.
+   * "pulse": the radar sweep itself. "area": a rough area where a prop is (the hunt tightening).
+   * "dust": someone just disguised or undisguised nearby.
+   */
+  kind: "noise" | "radar" | "pulse" | "area" | "dust";
+  /** For "area": the real position is somewhere inside this radius. */
+  r?: number;
 }
 /** Use your ability. */
 export const MSG_ABILITY = "ability";
+
+/** Hunter starts or stops inspecting what is under the mouse: { x, y, on }. */
+export const MSG_INSPECT = "inspect";
+export interface InspectMessage {
+  x: number;
+  y: number;
+  on: boolean;
+}
+/** Server to the hunter: how an inspection ended. */
+export const MSG_INSPECT_RESULT = "inspected";
+export interface InspectResult {
+  x: number;
+  y: number;
+  /** "clear": just an object. "found": it was a player. "moved": it moved away, so it was a player. "none": nothing there. */
+  result: "clear" | "found" | "moved" | "none";
+  /** For "clear": which object, so it can be ticked off. */
+  propId?: number;
+}
+/** Server to a prop: the hunter is inspecting you (active) or has stopped. */
+export const MSG_ALERT = "alert";
+export interface AlertMessage {
+  active: boolean;
+}

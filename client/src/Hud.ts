@@ -24,6 +24,8 @@ export class Hud {
   private note: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text;
   private abilityText: Phaser.GameObjects.Text;
+  private warning: Phaser.GameObjects.Text;
+  private touchMode = false;
   private timerBack: Phaser.GameObjects.Rectangle;
   private timerFill: Phaser.GameObjects.Rectangle;
   private boardBg: Phaser.GameObjects.Rectangle;
@@ -59,6 +61,7 @@ export class Hud {
       .setScrollFactor(0)
       .setDepth(d)
       .setVisible(false);
+    this.warning = text(24, "#ff6b6b").setOrigin(0.5, 0).setVisible(false);
     this.toastText = text(16).setOrigin(0, 0).setVisible(false);
     this.note = text(16).setOrigin(0.5, 1).setVisible(false);
     this.prompt = scene.add
@@ -99,10 +102,25 @@ export class Hud {
     });
   }
 
+  /** On a touch screen the on-screen buttons replace the key hints and the ability label. */
+  setTouchMode(on: boolean) {
+    this.touchMode = on;
+  }
+
+  /** A flashing warning under the title, or null to hide it. */
+  setWarning(text: string | null, time: number) {
+    const { width } = this.scene.scale;
+    if (!text) {
+      this.warning.setVisible(false);
+      return;
+    }
+    this.warning.setWordWrapWidth(Math.max(160, width - 24)).setPosition(width / 2, 100).setText(text).setVisible(true).setAlpha(0.55 + 0.45 * Math.abs(Math.sin(time / 180)));
+  }
+
   /** The ability button in the bottom right: its name, and when it is ready. */
   setAbility(label: string | null, cooldown: number) {
     const { width, height } = this.scene.scale;
-    if (!label) {
+    if (!label || this.touchMode) {
       this.abilityText.setVisible(false);
       return;
     }
@@ -116,7 +134,8 @@ export class Hud {
 
   /** A short message in the top left corner. */
   toast(message: string) {
-    this.toastText.setText(message).setPosition(12, 12).setAlpha(1).setVisible(true);
+    const { height } = this.scene.scale;
+    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 24)).setPosition(12, this.touchMode ? height - 70 : 12).setAlpha(1).setVisible(true);
     this.scene.tweens.killTweensOf(this.toastText);
     this.scene.tweens.add({ targets: this.toastText, alpha: 0, delay: 1200, duration: 400, onComplete: () => this.toastText.setVisible(false) });
   }
@@ -140,12 +159,16 @@ export class Hud {
     propsLeft: number;
     round?: number;
     mapName?: string;
+    alert?: number;
     /** Share of the phase time left (0 to 1), or below 0 for no bar. */
     fraction?: number;
   }) {
     const { width, height } = this.scene.scale;
+    const wrap = Math.max(160, Math.min(width - 24, 760));
+    this.title.setWordWrapWidth(wrap);
+    this.sub.setWordWrapWidth(wrap);
     this.title.setPosition(width / 2, 12);
-    this.sub.setPosition(width / 2, 48);
+    this.sub.setPosition(width / 2, 12 + this.title.height + 4);
     this.hint.setPosition(12, height - 12);
     this.banner.setPosition(width / 2, height / 2);
 
@@ -169,14 +192,14 @@ export class Hud {
         break;
       case "hide":
         title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
-        sub = info.role === "spectator" ? "Spectating until the next round" : isHunter ? "You can't see or move yet" : "Walk to a small object and press E to become it";
+        sub = info.role === "spectator" ? "Spectating until the next round" : isHunter ? "You can't see or move yet" : this.touchMode ? "Walk to a small object and tap Become" : "Walk to a small object and press E to become it";
         hint = isHunter ? "Click or Space: swing at the mouse   M: sound" : "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   M: sound";
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
-        sub = `Round ${info.round ?? 0} · ${info.mapName ?? ""}   ·   ${mmss}   ·   Props left: ${info.propsLeft}`;
+        sub = `Round ${info.round ?? 0} · ${info.mapName ?? ""}   ·   ${mmss}   ·   Props left: ${info.propsLeft}${info.alert ? `   ·   Alert ${info.alert}` : ""}`;
         hint = isHunter
-          ? "Click or Space: swing   F: radar   Yellow rings: something is moving   Tab: scores   M: sound"
+          ? "Click / Space: swing   Hold E: inspect (safe)   F: radar   Rings: something moved   Tab: scores"
           : "Don't run! Hide: E / Q / R, then hold still.   F: send the hunter a fake noise   Tab: scores   M: sound";
         break;
       case "end":
@@ -186,23 +209,27 @@ export class Hud {
     }
     this.title.setText(title).setVisible(title !== "");
     this.sub.setText(sub).setVisible(sub !== "");
-    this.hint.setText(hint);
+    this.hint.setText(this.touchMode ? "" : hint);
 
     // Time bar under the title: green, then yellow, then red as time runs out.
     const f = info.fraction ?? -1;
     const showBar = f >= 0 && (info.phase === "hide" || info.phase === "hunt");
-    this.timerBack.setVisible(showBar).setPosition(width / 2, 80);
+    const barY = this.sub.y + (this.sub.visible ? this.sub.height : 0) + 10;
+    this.timerBack.setVisible(showBar).setPosition(width / 2, barY);
     this.timerFill
       .setVisible(showBar)
-      .setPosition(width / 2 - 160, 80)
+      .setPosition(width / 2 - 160, barY)
       .setSize(Math.max(1, 320 * Math.min(1, f)), 6)
       .setFillStyle(f > 0.4 ? 0x4ade80 : f > 0.15 ? 0xfacc15 : 0xef4444);
 
     // Hunter health
     const showHp = isHunter && (info.phase === "hide" || info.phase === "hunt");
-    this.hpBack.setVisible(showHp).setPosition(width - 12, 12);
-    this.hpFill.setVisible(showHp).setPosition(width - 12, 12).setSize(Math.max(1, (200 * info.hp) / HUNTER_MAX_HP), 14);
-    this.hpLabel.setVisible(showHp).setPosition(width - 12, 30).setText(`Health ${info.hp}`);
+    const narrow = width < 700;
+    const hx = narrow ? width / 2 + 100 : width - 12;
+    const hy = narrow ? barY + 12 : 12;
+    this.hpBack.setVisible(showHp).setPosition(hx, hy);
+    this.hpFill.setVisible(showHp).setPosition(hx, hy).setSize(Math.max(1, (200 * info.hp) / HUNTER_MAX_HP), 14);
+    this.hpLabel.setVisible(showHp).setPosition(hx, hy + 18).setText(`Health ${info.hp}`);
 
     // Result banner
     if (info.phase === "end" && info.winner) {

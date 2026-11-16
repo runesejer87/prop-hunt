@@ -10,6 +10,9 @@ const game = new Phaser.Game({
   parent: "game",
   backgroundColor: "#1b1d23",
   scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
+  // Several fingers at once (joystick plus buttons), and no right-click menu.
+  input: { activePointers: 4 },
+  disableContextMenu: true,
   scene: [],
 });
 game.scene.add("GameScene", GameScene, true, { room });

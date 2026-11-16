@@ -3,6 +3,7 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { Hud, type BoardRow } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
+import { TouchControls, isTouchDevice } from "./Touch.ts";
 import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, makeLightTextures, placeLights, charKey } from "./art.ts";
 import {
   MSG_INPUT,
@@ -13,6 +14,12 @@ import {
   MSG_SWING,
   MSG_PING,
   MSG_ABILITY,
+  MSG_INSPECT,
+  MSG_INSPECT_RESULT,
+  MSG_ALERT,
+  type InspectResult,
+  type AlertMessage,
+  SWEEP_EVERY,
   type PingEvent,
   RADAR_RADIUS,
   type SwingEvent,
@@ -54,6 +61,17 @@ export class GameScene extends Phaser.Scene {
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyTab!: Phaser.Input.Keyboard.Key;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private touch?: TouchControls;
+  private touchUsed = false;
+  private baseZoom = 1;
+  private lastSentAt = 0;
+  private inspectHeld = false;
+  private inspectAim = { x: 0, y: 0 };
+  private checks = new Map<number, Phaser.GameObjects.Text>();
+  private beingInspected = false;
+  private lastAlarmAt = 0;
+  private prevAlert = 0;
+  private prevRound = 0;
   private names = new Map<string, Phaser.GameObjects.Text>();
   private sfx = new Sound();
   private chars = new Map<string, Phaser.GameObjects.Image>();
@@ -112,14 +130,29 @@ export class GameScene extends Phaser.Scene {
     const fitVignette = () => this.vignette.setDisplaySize(this.scale.width, this.scale.height);
     fitVignette();
     this.scale.on("resize", fitVignette);
-    this.cameras.main.setZoom(0.85);
-    this.tweens.add({ targets: this.cameras.main, zoom: 1, duration: 900, ease: "Cubic.easeOut" });
-
+    // (No camera zoom: it would also shrink and shift the on-screen buttons and text.)
     this.hud = new Hud(this);
     this.reticle = this.add.graphics().setDepth(60);
     // Props can see exactly what the hunter can see (a faint red glow on the floor).
     this.hunterView = this.add.graphics().setDepth(3);
-    this.input.on("pointerdown", () => this.swing());
+    // The mouse swings where it points. Fingers use the on-screen buttons instead.
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      this.touchUsed = p.wasTouch;
+      if (!p.wasTouch) this.swing();
+    });
+    if (isTouchDevice()) {
+      this.touch = new TouchControls(this, {
+        disguise: () => this.doDisguise(),
+        undisguise: () => this.room?.send(MSG_UNDISGUISE),
+        rotate: () => this.doRotate(),
+        ability: () => this.doAbility(),
+        swing: () => this.swing(),
+        inspect: (on) => (on ? this.startInspect() : this.stopInspect()),
+        mute: () => this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on"),
+      });
+      this.hud.setTouchMode(true);
+      if (this.scale.height > this.scale.width && this.scale.width < 700) this.hud.toast("Tip: turn your phone sideways for a better view");
+    }
     this.attach(this.initialRoom);
   }
 
@@ -130,6 +163,7 @@ export class GameScene extends Phaser.Scene {
     this.lightImages = [];
     for (const obj of this.worldObjects) obj.destroy();
     this.worldObjects = [];
+    this.clearChecks();
 
     this.map = getMap(mapId);
     this.mapId = this.map.id;
@@ -233,9 +267,50 @@ export class GameScene extends Phaser.Scene {
     });
     room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
     room.onMessage(MSG_PING, (p: PingEvent) => this.showPing(p));
+    room.onMessage(MSG_INSPECT_RESULT, (r: InspectResult) => this.showInspectResult(r));
+    room.onMessage(MSG_ALERT, (a: AlertMessage) => {
+      this.beingInspected = a.active;
+      if (a.active) this.sfx.alarm();
+    });
     room.onLeave(() => {
       this.connected = false;
     });
+  }
+
+  /** What the hunter learns from an inspection. */
+  private showInspectResult(r: InspectResult) {
+    const say = (text: string, color: string) => {
+      const label = this.add
+        .text(r.x, r.y - 22, text, { fontFamily: "sans-serif", fontSize: "16px", color, stroke: "#000", strokeThickness: 3 })
+        .setOrigin(0.5)
+        .setDepth(70);
+      this.tweens.add({ targets: label, y: label.y - 26, alpha: 0, duration: 1300, onComplete: () => label.destroy() });
+    };
+    if (r.result === "clear") {
+      say("Just an object", "#9dffa8");
+      this.sfx.inspectOk();
+      if (r.propId !== undefined && !this.checks.has(r.propId)) {
+        const prop = this.map.props.find((p) => p.id === r.propId);
+        if (prop) {
+          // A tick stays on checked objects for the rest of the round.
+          const tick = this.add
+            .text(prop.x, prop.y, "✓", { fontFamily: "sans-serif", fontSize: "20px", fontStyle: "bold", color: "#7cf5a0", stroke: "#000", strokeThickness: 3 })
+            .setOrigin(0.5)
+            .setDepth(6)
+            .setAlpha(0.9);
+          this.checks.set(r.propId, tick);
+        }
+      }
+    } else if (r.result === "moved") {
+      say("It moved!", "#ffe27a");
+    } else if (r.result === "none") {
+      this.hud.toast("Nothing there to inspect");
+    }
+  }
+
+  private clearChecks() {
+    this.checks.forEach((t) => t.destroy());
+    this.checks.clear();
   }
 
   /** A little puff of round particles. Used for dust, sparks and pops. */
@@ -264,6 +339,22 @@ export class GameScene extends Phaser.Scene {
       const sweep = this.add.circle(p.x, p.y, 10).setStrokeStyle(3, 0x5ad1ff, 0.8).setDepth(55);
       this.tweens.add({ targets: sweep, radius: RADAR_RADIUS, alpha: 0, duration: 800, ease: "Cubic.easeOut", onComplete: () => sweep.destroy() });
       this.sfx.radar();
+      return;
+    }
+    if (p.kind === "area") {
+      // The prop is somewhere inside this circle.
+      const r = p.r ?? 100;
+      const area = this.add.circle(p.x, p.y, r, 0xff7a3a, 0.13).setStrokeStyle(2, 0xff9a5a, 0.7).setDepth(55);
+      this.tweens.add({ targets: area, alpha: 0, duration: 3600, ease: "Quad.easeIn", onComplete: () => area.destroy() });
+      this.sfx.ping(this.audioFrom(p.x, p.y).pan);
+      return;
+    }
+    if (p.kind === "dust") {
+      // Someone just changed shape near here.
+      this.burst(p.x, p.y, 0xe8e4da, 10, 46, 1100, 4.5, 0.55);
+      const q = this.add.text(p.x, p.y - 8, "?", { fontFamily: "sans-serif", fontSize: "18px", color: "#fff", stroke: "#000", strokeThickness: 3 }).setOrigin(0.5).setDepth(55);
+      this.tweens.add({ targets: q, y: q.y - 16, alpha: 0, duration: 1400, onComplete: () => q.destroy() });
+      this.sfx.poof(0.35, this.audioFrom(p.x, p.y).pan);
       return;
     }
     const radar = p.kind === "radar";
@@ -302,10 +393,60 @@ export class GameScene extends Phaser.Scene {
     return !!this.room && !!me && me.role === "hunter" && this.room.state.phase === "hunt";
   }
 
+  /** Where the hunter is aiming: the mouse, or (on a touch screen) a little way ahead of where they face. */
+  private aimWorld(): { x: number; y: number } {
+    const id = this.room?.sessionId;
+    const dot = id ? this.sprites.get(id) : undefined;
+    if (this.touch && this.touchUsed && dot && id) {
+      const a = this.chars.get(id)?.rotation ?? 0;
+      return { x: dot.x + Math.cos(a) * ATTACK_RANGE * 0.8, y: dot.y + Math.sin(a) * ATTACK_RANGE * 0.8 };
+    }
+    const ptr = this.input.activePointer;
+    return { x: ptr.worldX, y: ptr.worldY };
+  }
+
   private swing() {
     if (!this.canSwing()) return;
-    const ptr = this.input.activePointer;
-    this.room!.send(MSG_ATTACK, { x: ptr.worldX, y: ptr.worldY });
+    const aim = this.aimWorld();
+    this.stopInspect();
+    this.room!.send(MSG_ATTACK, { x: aim.x, y: aim.y });
+  }
+
+  // ---- things you can do (keyboard keys and touch buttons both call these)
+
+  private doDisguise() {
+    if (this.me?.role === "prop") this.room?.send(MSG_DISGUISE);
+  }
+
+  private doRotate() {
+    if (this.myBody?.disguise) this.room?.send(MSG_ROTATE);
+  }
+
+  private doAbility() {
+    const me = this.me;
+    const room = this.room;
+    if (!room || !me || room.state.phase !== "hunt" || !me.alive || me.cooldown > 0) return;
+    if (me.role !== "prop" && me.role !== "hunter") return;
+    room.send(MSG_ABILITY);
+    if (me.role === "prop") {
+      this.sfx.distract();
+      this.hud.toast("Fake noise sent");
+    }
+  }
+
+  /** The hunter starts checking whatever is where they are aiming (takes a couple of seconds). */
+  private startInspect() {
+    const me = this.me;
+    if (!this.room || !me || me.role !== "hunter" || this.room.state.phase !== "hunt" || this.inspectHeld) return;
+    this.inspectHeld = true;
+    this.inspectAim = this.aimWorld();
+    this.room.send(MSG_INSPECT, { x: this.inspectAim.x, y: this.inspectAim.y, on: true });
+  }
+
+  private stopInspect() {
+    if (!this.inspectHeld) return;
+    this.inspectHeld = false;
+    this.room?.send(MSG_INSPECT, { x: 0, y: 0, on: false });
   }
 
   /** A slash, a ring and a message where a swing landed, plus its sounds. */
@@ -479,27 +620,37 @@ export class GameScene extends Phaser.Scene {
     const phase = state.phase;
     const myDot = this.sprites.get(room.sessionId);
     const iAmHunter = me.role === "hunter";
-    const frozen = iAmHunter && phase === "hide";
+    const frozen = iAmHunter && (phase === "hide" || me.inspect > 0);
 
-    // Send input only when it changes.
-    const dx = frozen ? 0 : (this.cursors.right.isDown || this.wasd.D.isDown ? 1 : 0) - (this.cursors.left.isDown || this.wasd.A.isDown ? 1 : 0);
-    const dy = frozen ? 0 : (this.cursors.down.isDown || this.wasd.S.isDown ? 1 : 0) - (this.cursors.up.isDown || this.wasd.W.isDown ? 1 : 0);
-    if (dx !== this.lastInput.dx || dy !== this.lastInput.dy) {
+    // Movement: keyboard (whole steps) or touch joystick (any direction and strength).
+    const key = {
+      x: (this.cursors.right.isDown || this.wasd.D.isDown ? 1 : 0) - (this.cursors.left.isDown || this.wasd.A.isDown ? 1 : 0),
+      y: (this.cursors.down.isDown || this.wasd.S.isDown ? 1 : 0) - (this.cursors.up.isDown || this.wasd.W.isDown ? 1 : 0),
+    };
+    const stick = this.touch?.vector ?? { x: 0, y: 0 };
+    const useStick = Math.abs(stick.x) + Math.abs(stick.y) > 0.01;
+    const dx = frozen ? 0 : useStick ? stick.x : key.x;
+    const dy = frozen ? 0 : useStick ? stick.y : key.y;
+    // Send when it changes (a joystick changes a lot, so not more often than every 40 ms).
+    const changed = Math.abs(dx - this.lastInput.dx) > 0.04 || Math.abs(dy - this.lastInput.dy) > 0.04;
+    const stopped = dx === 0 && dy === 0 && (this.lastInput.dx !== 0 || this.lastInput.dy !== 0);
+    if (stopped || (changed && time - this.lastSentAt >= 40)) {
       this.lastInput = { dx, dy };
+      this.lastSentAt = time;
       room.send(MSG_INPUT, { dx, dy });
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyE)) room.send(MSG_DISGUISE);
-    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
-    if (Phaser.Input.Keyboard.JustDown(this.keyR) && myBody.disguise) room.send(MSG_ROTATE);
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
-    if (Phaser.Input.Keyboard.JustDown(this.keyF) && phase === "hunt" && me.alive && me.cooldown <= 0 && (me.role === "prop" || me.role === "hunter")) {
-      room.send(MSG_ABILITY);
-      if (me.role === "prop") {
-        this.sfx.distract();
-        this.hud.toast("Fake noise sent");
-      }
+    // Keys. The hunter's E is "inspect" (hold); a prop's E is "become that object".
+    if (me.role === "hunter") {
+      if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.startInspect();
+      if (Phaser.Input.Keyboard.JustUp(this.keyE)) this.stopInspect();
+    } else if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+      this.doDisguise();
     }
+    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
+    if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.doRotate();
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
+    if (Phaser.Input.Keyboard.JustDown(this.keyF)) this.doAbility();
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
     state.bodies.forEach((p: BodyState, id: string) => {
@@ -517,9 +668,10 @@ export class GameScene extends Phaser.Scene {
 
       // Me: move instantly with the same rules as the server (prediction),
       // so the game feels responsive even when the connection is slow.
-      if (dx !== 0 || dy !== 0) {
-        const len = Math.hypot(dx, dy);
-        const step = (moveSpeed(me.role, !!myBody.disguise) * delta) / 1000;
+      const len = Math.hypot(dx, dy);
+      const moving = len > 0.05;
+      if (moving) {
+        const step = (moveSpeed(me.role, !!myBody.disguise) * delta * Math.min(1, len)) / 1000;
         const next = this.map.moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
         dot.setPosition(next.x, next.y);
       }
@@ -528,7 +680,7 @@ export class GameScene extends Phaser.Scene {
       const err = Math.hypot(p.x - dot.x, p.y - dot.y);
       if (err > 120) {
         dot.setPosition(p.x, p.y); // far off: snap
-      } else if (dx === 0 && dy === 0) {
+      } else if (!moving) {
         dot.x = Phaser.Math.Linear(dot.x, p.x, 0.2); // standing still: settle
         dot.y = Phaser.Math.Linear(dot.y, p.y, 0.2);
       }
@@ -565,13 +717,18 @@ export class GameScene extends Phaser.Scene {
       if (phase === "hide") this.fog.blind();
       else this.fog.see(myDot.x, myDot.y, this.map);
       if (phase === "hunt") {
-        const ptr = this.input.activePointer;
-        const d = Math.hypot(ptr.worldX - myDot.x, ptr.worldY - myDot.y) || 1;
+        const aim = this.me && me.inspect > 0 ? this.inspectAim : this.aimWorld();
+        const d = Math.hypot(aim.x - myDot.x, aim.y - myDot.y) || 1;
         const k = Math.min(1, ATTACK_RANGE / d);
-        const ax = myDot.x + (ptr.worldX - myDot.x) * k;
-        const ay = myDot.y + (ptr.worldY - myDot.y) * k;
+        const ax = myDot.x + (aim.x - myDot.x) * k;
+        const ay = myDot.y + (aim.y - myDot.y) * k;
         this.reticle.lineStyle(1, 0xffffff, 0.25).strokeCircle(myDot.x, myDot.y, ATTACK_RANGE);
         this.reticle.lineStyle(2, 0xffffff, 0.9).strokeCircle(ax, ay, 9).lineBetween(ax - 13, ay, ax + 13, ay).lineBetween(ax, ay - 13, ax, ay + 13);
+        // Inspecting: a ring fills up around the thing being checked.
+        if (me.inspect > 0) {
+          this.reticle.lineStyle(3, 0x5ad1ff, 0.25).strokeCircle(ax, ay, 24);
+          this.reticle.lineStyle(5, 0x5ad1ff, 1).beginPath().arc(ax, ay, 24, -Math.PI / 2, -Math.PI / 2 + (me.inspect / 100) * Math.PI * 2).strokePath();
+        }
       }
     } else {
       this.fog.hide();
@@ -600,6 +757,44 @@ export class GameScene extends Phaser.Scene {
       this.hunterView.lineStyle(2, 0xef4444, 0.45).strokePoints(pts, true);
     }
 
+    // Round changed: forget what was ticked off.
+    if (state.round !== this.prevRound) {
+      this.prevRound = state.round;
+      this.clearChecks();
+      this.beingInspected = false;
+    }
+    // The hunt tightens: tell everyone what that means for them.
+    if (state.alert !== this.prevAlert) {
+      if (state.alert > this.prevAlert && state.phase === "hunt") {
+        const every = SWEEP_EVERY[state.alert - 1];
+        this.hud.toast(
+          iAmHunter
+            ? `The hunt tightens: you'll see a rough area for every prop every ${every}s, and radar recharges faster`
+            : `Careful! The hunter now senses roughly where you are every ${every}s`,
+        );
+        this.sfx.huntStart();
+      }
+      this.prevAlert = state.alert;
+    }
+    // A prop being inspected has a few seconds to slip away.
+    if (this.beingInspected && (me.role !== "prop" || !me.alive || phase !== "hunt")) this.beingInspected = false;
+    if (this.beingInspected) {
+      this.hud.setWarning("THE HUNTER IS INSPECTING YOU — MOVE AWAY!", time);
+      if (time - this.lastAlarmAt > 450) {
+        this.lastAlarmAt = time;
+        this.sfx.alarm();
+      }
+    } else {
+      this.hud.setWarning(null, time);
+    }
+
+    // Touch buttons for the role you have right now.
+    if (this.touch) {
+      const mode = !me.alive || me.role === "spectator" || phase === "end" ? "none" : me.role === "hunter" ? "hunter" : "prop";
+      const abilityOn = phase === "hunt" && me.alive && (me.role === "hunter" || me.role === "prop");
+      this.touch.update(mode, abilityOn ? { label: me.role === "hunter" ? "Radar" : "Distract", cooldown: me.cooldown } : null);
+    }
+
     // Prompt to copy a nearby object (props only).
     let prompt: string | null = null;
     if (myDot && me.role === "prop" && me.alive && phase !== "end") {
@@ -625,7 +820,7 @@ export class GameScene extends Phaser.Scene {
     const rows: BoardRow[] = [];
     state.players.forEach((p: PlayerState, id: string) => rows.push({ name: p.name, score: p.score, gain: p.gain, role: p.role, me: id === room.sessionId }));
     rows.sort((a, b) => b.score - a.score);
-    this.hud.setBoard(this.keyTab.isDown || phase === "end", rows, state.round, phase === "end");
+    this.hud.setBoard(this.keyTab.isDown || !!this.touch?.scoresHeld || phase === "end", rows, state.round, phase === "end");
 
     const abilityLabel = phase === "hunt" && me.alive ? (me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;
     this.hud.setAbility(abilityLabel, me.cooldown);
@@ -634,6 +829,7 @@ export class GameScene extends Phaser.Scene {
       connected: true,
       round: state.round,
       mapName: this.map.name,
+      alert: state.alert,
       fraction: phase === "hide" ? state.timeLeft / HIDE_TIME : phase === "hunt" ? state.timeLeft / HUNT_TIME : -1,
       phase,
       timeLeft: state.timeLeft,

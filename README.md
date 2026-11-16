@@ -15,6 +15,11 @@ Pick a name on the title screen. The game keeps going round after round and the 
 least goes next). Points: the hunter gets 2 per prop found, plus 2 for finding everyone; props get 3 for surviving.
 Hold **Tab** to see the scoreboard; it also shows at the end of each round.
 
+## Phones and tablets
+It works on phones and iPads: a joystick appears under your left thumb, and buttons on the right change with your role
+(props: Become, Undo, Turn, Distract; hunter: Swing, hold Inspect, Radar). Several fingers work at once. Landscape is best.
+On iPhone/iPad, "Add to Home Screen" opens it full screen like an app.
+
 ## Password
 Set the `GAME_PASSWORD` environment variable on the **server** and players must enter it on a join screen
 (it is remembered for the browser tab). If it is not set, anyone can join (handy for local development).
@@ -44,6 +49,10 @@ The server runs on port 2567.
 - Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
 - Running does not work: the hunter is faster than props, a disguised prop that moves only shuffles slowly, and a prop that keeps
   moving shows up as a yellow ping near its position for the hunter every few seconds. Hiding (and holding still) is the way to win.
+- **Inspect** (hunter, hold **E**): check the object under the mouse in 2 seconds, with no health cost. Ordinary objects get a tick;
+  a hiding player is found. The player is warned and can slip away, which gives them away.
+- **The hunt tightens**: after 60 s and 120 s the hunter gets a rough circle for every prop every 20 s, then 10 s, and the radar recharges faster.
+- **Dust clue**: when a prop disguises or undisguises within about 12 tiles of the hunter, a small puff with a "?" shows nearby.
 - Abilities (**F**): props can **Distract** (a fake yellow ping somewhere else, 15 s cooldown); the hunter has **Radar**
   (a blue sweep that pings every prop within about 10 tiles, even still ones, 25 s cooldown, ready 8 s into the hunt).
 - Props: **E** to become a nearby small object (it copies which way that object faces), **R** to turn it, **Q** to change back. Found props become ghosts.
