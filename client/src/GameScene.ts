@@ -7,6 +7,7 @@ import {
   WORLD_WIDTH,
   WORLD_HEIGHT,
   PLAYER_RADIUS,
+  PLAYER_SPEED,
   GameState,
   type PlayerState,
 } from "@prop-hunt/shared";
@@ -62,7 +63,7 @@ export class GameScene extends Phaser.Scene {
     if (isMe) this.cameras.main.startFollow(dot, true, 0.15, 0.15);
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (!this.room) return;
 
     // Send input only when it changes.
@@ -73,12 +74,33 @@ export class GameScene extends Phaser.Scene {
       this.room.send(MSG_INPUT, { dx, dy });
     }
 
-    // Smoothly move each dot toward the server position.
     this.room.state.players.forEach((p: PlayerState, id: string) => {
       const dot = this.sprites.get(id);
-      if (dot) {
+      if (!dot) return;
+
+      if (id !== this.room!.sessionId) {
+        // Other players: glide toward the latest server position.
         dot.x = Phaser.Math.Linear(dot.x, p.x, 0.3);
         dot.y = Phaser.Math.Linear(dot.y, p.y, 0.3);
+        return;
+      }
+
+      // Me: move instantly with the same rules as the server (prediction),
+      // so the game feels responsive even when the connection is slow.
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.hypot(dx, dy);
+        const step = (PLAYER_SPEED * delta) / 1000;
+        dot.x = Phaser.Math.Clamp(dot.x + (dx / len) * step, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
+        dot.y = Phaser.Math.Clamp(dot.y + (dy / len) * step, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+      }
+
+      // Correct drift toward the server's version of events.
+      const err = Math.hypot(p.x - dot.x, p.y - dot.y);
+      if (err > 120) {
+        dot.setPosition(p.x, p.y); // far off: snap
+      } else if (dx === 0 && dy === 0) {
+        dot.x = Phaser.Math.Linear(dot.x, p.x, 0.2); // standing still: settle
+        dot.y = Phaser.Math.Linear(dot.y, p.y, 0.2);
       }
     });
   }
