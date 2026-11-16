@@ -30,6 +30,16 @@ export function moveSpeed(role: string, disguised: boolean): number {
   return disguised ? DISGUISED_SPEED : PROP_SPEED;
 }
 
+/** Abilities (key F). Props: Distract sends the hunter a fake ping. Hunter: Radar pings props nearby. */
+export const DISTRACT_COOLDOWN = 15;
+export const DISTRACT_MIN = 120;
+export const DISTRACT_MAX = 260;
+export const RADAR_COOLDOWN = 25;
+/** First radar is available this many seconds after the hunt begins. */
+export const RADAR_START_DELAY = 8;
+export const RADAR_RADIUS = 320;
+export const RADAR_JITTER = 24;
+
 /** A prop that keeps moving gives away roughly where it is every few seconds. */
 export const PING_INTERVAL = 2.5;
 /** How far (pixels) the revealed spot can be from the prop's real position. */
@@ -79,6 +89,8 @@ export const PlayerState = schema(
     score: t.number(),
     /** Points earned in the round that just ended (shown on the results screen). */
     gain: t.number(),
+    /** Seconds until your ability (F) is ready again; 0 means ready. */
+    cooldown: t.number(),
   },
   "PlayerState",
 );
@@ -150,5 +162,13 @@ export interface SwingEvent {
   result: "player" | "prop" | "nothing";
 }
 
-/** Server tells the hunter roughly where a moving prop is: { x, y }. */
+/** Server tells the hunter roughly where something is. */
 export const MSG_PING = "ping";
+export interface PingEvent {
+  x: number;
+  y: number;
+  /** "noise": a moving prop or a decoy (they look the same). "radar": found by the hunter's radar. "pulse": the radar sweep itself. */
+  kind: "noise" | "radar" | "pulse";
+}
+/** Use your ability. */
+export const MSG_ABILITY = "ability";

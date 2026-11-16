@@ -23,6 +23,7 @@ export class Hud {
   private prompt: Phaser.GameObjects.Text;
   private note: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text;
+  private abilityText: Phaser.GameObjects.Text;
   private timerBack: Phaser.GameObjects.Rectangle;
   private timerFill: Phaser.GameObjects.Rectangle;
   private boardBg: Phaser.GameObjects.Rectangle;
@@ -52,6 +53,12 @@ export class Hud {
         .setDepth(d + 3)
         .setVisible(false),
     );
+    this.abilityText = scene.add
+      .text(0, 0, "", { fontFamily: FONT, fontSize: "18px", fontStyle: "bold", color: "#ffffff", backgroundColor: "#000000a0", padding: { x: 12, y: 8 } })
+      .setOrigin(1, 1)
+      .setScrollFactor(0)
+      .setDepth(d)
+      .setVisible(false);
     this.toastText = text(16).setOrigin(0, 0).setVisible(false);
     this.note = text(16).setOrigin(0.5, 1).setVisible(false);
     this.prompt = scene.add
@@ -90,6 +97,21 @@ export class Hud {
         .setPosition(width / 2 - 200, top + 36 + i * 28)
         .setVisible(true);
     });
+  }
+
+  /** The ability button in the bottom right: its name, and when it is ready. */
+  setAbility(label: string | null, cooldown: number) {
+    const { width, height } = this.scene.scale;
+    if (!label) {
+      this.abilityText.setVisible(false);
+      return;
+    }
+    const ready = cooldown <= 0;
+    this.abilityText
+      .setText(ready ? `F · ${label}` : `F · ${label}  ${cooldown}s`)
+      .setColor(ready ? "#9dffa8" : "#9aa0ac")
+      .setPosition(width - 14, height - 14)
+      .setVisible(true);
   }
 
   /** A short message in the top left corner. */
@@ -153,8 +175,8 @@ export class Hud {
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
         sub = `Round ${info.round ?? 0}   ·   ${mmss}   ·   Props left: ${info.propsLeft}`;
         hint = isHunter
-          ? "Click or Space: swing at the mouse   (hit a non-player and you lose health)   Yellow rings: something is moving nearby   M: sound"
-          : "Don't run! The hunter is faster, and moving props give themselves away. Hide: E / Q / R, hold still.   M: sound";
+          ? "Click or Space: swing   F: radar   Yellow rings: something is moving   Tab: scores   M: sound"
+          : "Don't run! Hide: E / Q / R, then hold still.   F: send the hunter a fake noise   Tab: scores   M: sound";
         break;
       case "end":
         title = "Round over";

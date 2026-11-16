@@ -12,6 +12,9 @@ import {
   MSG_ATTACK,
   MSG_SWING,
   MSG_PING,
+  MSG_ABILITY,
+  type PingEvent,
+  RADAR_RADIUS,
   type SwingEvent,
   ATTACK_RANGE,
   VISION_RADIUS,
@@ -51,6 +54,7 @@ export class GameScene extends Phaser.Scene {
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyTab!: Phaser.Input.Keyboard.Key;
+  private keyF!: Phaser.Input.Keyboard.Key;
   private names = new Map<string, Phaser.GameObjects.Text>();
   private sfx = new Sound();
   private chars = new Map<string, Phaser.GameObjects.Image>();
@@ -92,6 +96,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM = this.input.keyboard!.addKey("M");
     this.keyR = this.input.keyboard!.addKey("R");
     this.keyTab = this.input.keyboard!.addKey("TAB");
+    this.keyF = this.input.keyboard!.addKey("F");
     this.input.keyboard!.addCapture("TAB");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
 
@@ -195,7 +200,7 @@ export class GameScene extends Phaser.Scene {
       if (id === room.sessionId) this.selfRing?.destroy();
     });
     room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
-    room.onMessage(MSG_PING, (p: { x: number; y: number }) => this.showPing(p));
+    room.onMessage(MSG_PING, (p: PingEvent) => this.showPing(p));
     room.onLeave(() => {
       this.connected = false;
     });
@@ -221,13 +226,22 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** The hunter hears and sees roughly where a moving prop is. */
-  private showPing(p: { x: number; y: number }) {
-    const ring = this.add.circle(p.x, p.y, 6).setStrokeStyle(3, 0xfbbf24, 0.95).setDepth(55);
-    const dot = this.add.circle(p.x, p.y, 4, 0xfbbf24, 0.9).setDepth(55);
-    this.tweens.add({ targets: ring, radius: 54, alpha: 0, duration: 1700, onComplete: () => ring.destroy() });
-    this.tweens.add({ targets: dot, alpha: 0, duration: 1700, onComplete: () => dot.destroy() });
-    this.sfx.ping(this.audioFrom(p.x, p.y).pan);
+  /** Rings on the hunter's screen: noises (yellow), radar blips (blue) and the radar sweep itself. */
+  private showPing(p: PingEvent) {
+    if (p.kind === "pulse") {
+      const sweep = this.add.circle(p.x, p.y, 10).setStrokeStyle(3, 0x5ad1ff, 0.8).setDepth(55);
+      this.tweens.add({ targets: sweep, radius: RADAR_RADIUS, alpha: 0, duration: 800, ease: "Cubic.easeOut", onComplete: () => sweep.destroy() });
+      this.sfx.radar();
+      return;
+    }
+    const radar = p.kind === "radar";
+    const color = radar ? 0x5ad1ff : 0xfbbf24;
+    const life = radar ? 2400 : 1700;
+    const ring = this.add.circle(p.x, p.y, 6).setStrokeStyle(3, color, 0.95).setDepth(55);
+    const dot = this.add.circle(p.x, p.y, 4, color, 0.9).setDepth(55);
+    this.tweens.add({ targets: ring, radius: radar ? 36 : 54, alpha: 0, duration: life, onComplete: () => ring.destroy() });
+    this.tweens.add({ targets: dot, alpha: 0, duration: life, onComplete: () => dot.destroy() });
+    if (!radar) this.sfx.ping(this.audioFrom(p.x, p.y).pan);
   }
 
   private addBody(b: BodyState, id: string) {
@@ -446,6 +460,13 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) room.send(MSG_UNDISGUISE);
     if (Phaser.Input.Keyboard.JustDown(this.keyR) && myBody.disguise) room.send(MSG_ROTATE);
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.swing();
+    if (Phaser.Input.Keyboard.JustDown(this.keyF) && phase === "hunt" && me.alive && me.cooldown <= 0 && (me.role === "prop" || me.role === "hunter")) {
+      room.send(MSG_ABILITY);
+      if (me.role === "prop") {
+        this.sfx.distract();
+        this.hud.toast("Fake noise sent");
+      }
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
     state.bodies.forEach((p: BodyState, id: string) => {
@@ -572,6 +593,9 @@ export class GameScene extends Phaser.Scene {
     state.players.forEach((p: PlayerState, id: string) => rows.push({ name: p.name, score: p.score, gain: p.gain, role: p.role, me: id === room.sessionId }));
     rows.sort((a, b) => b.score - a.score);
     this.hud.setBoard(this.keyTab.isDown || phase === "end", rows, state.round, phase === "end");
+
+    const abilityLabel = phase === "hunt" && me.alive ? (me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;
+    this.hud.setAbility(abilityLabel, me.cooldown);
 
     this.hud.update({
       connected: true,

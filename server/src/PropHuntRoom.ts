@@ -26,6 +26,15 @@ import {
   TICK_RATE,
   moveSpeed,
   MSG_PING,
+  MSG_ABILITY,
+  type PingEvent,
+  DISTRACT_COOLDOWN,
+  DISTRACT_MIN,
+  DISTRACT_MAX,
+  RADAR_COOLDOWN,
+  RADAR_START_DELAY,
+  RADAR_RADIUS,
+  RADAR_JITTER,
   PING_INTERVAL,
   PING_JITTER,
   PLAYER_RADIUS,
@@ -69,6 +78,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   private noise = new Map<string, number>();
   /** How many times each player has been the hunter, so the job rotates. */
   private hunts = new Map<string, number>();
+  /** Seconds left before each player can use their ability again. */
+  private cooldowns = new Map<string, number>();
 
   messages = {
     [MSG_INPUT]: (client: Client, msg: InputMessage) => {
@@ -100,6 +111,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (body) this.clearDisguise(client.sessionId, body);
     },
     [MSG_ATTACK]: (client: Client, msg: AttackMessage) => this.handleAttack(client.sessionId, msg),
+    [MSG_ABILITY]: (client: Client) => this.useAbility(client),
   };
 
   /**
@@ -164,6 +176,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.stillFor.delete(client.sessionId);
     this.noise.delete(client.sessionId);
     this.hunts.delete(client.sessionId);
+    this.cooldowns.delete(client.sessionId);
   }
 
   // ------------------------------------------------------------ visibility
@@ -262,6 +275,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       }
     });
     this.moveInputs.clear();
+    for (const p of all) this.setCooldown(p.id, 0);
     this.state.winner = "";
     this.setPhase("hide", HIDE_TIME);
   }
@@ -315,6 +329,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
       if (phase === "hide" && this.clockLeft <= 0) {
         this.setPhase("hunt", HUNT_TIME);
+        // Abilities start ready, except the hunter's radar which needs a few seconds.
+        for (const p of this.players()) this.setCooldown(p.id, p.role === "hunter" ? RADAR_START_DELAY : 0);
       } else if (phase === "end" && this.clockLeft <= 0) {
         this.backToLobby();
       } else if (phase === "hide" || phase === "hunt") {
@@ -323,6 +339,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       }
     }
 
+    this.tickCooldowns(dt);
     this.movePlayers(dt);
     this.syncViews();
   }
@@ -433,12 +450,72 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     });
   }
 
+  private hunterClient() {
+    return this.clients.find((c) => this.state.players.get(c.sessionId)?.role === "hunter");
+  }
+
   /** Tell the hunter (only) about a spot near this prop. */
   private sendPing(body: BodyState) {
-    const hunterClient = this.clients.find((c) => this.state.players.get(c.sessionId)?.role === "hunter");
-    if (!hunterClient) return;
+    const hunter = this.hunterClient();
+    if (!hunter) return;
     const j = () => (Math.random() * 2 - 1) * PING_JITTER;
-    hunterClient.send(MSG_PING, { x: body.x + j(), y: body.y + j() });
+    hunter.send(MSG_PING, { x: body.x + j(), y: body.y + j(), kind: "noise" } satisfies PingEvent);
+  }
+
+  // ------------------------------------------------------------- abilities
+
+  private setCooldown(id: string, seconds: number) {
+    this.cooldowns.set(id, seconds);
+    const player = this.state.players.get(id);
+    if (player) player.cooldown = Math.ceil(seconds);
+  }
+
+  private tickCooldowns(dt: number) {
+    this.cooldowns.forEach((left, id) => {
+      if (left <= 0) return;
+      const next = Math.max(0, left - dt);
+      this.cooldowns.set(id, next);
+      const player = this.state.players.get(id);
+      if (player && player.cooldown !== Math.ceil(next)) player.cooldown = Math.ceil(next);
+    });
+  }
+
+  /**
+   * F key. Props: "Distract" sends the hunter a fake noise somewhere else, which looks just like a
+   * real one. Hunter: "Radar" pings every prop close by, even hidden, still ones, but not exactly.
+   */
+  private useAbility(client: Client) {
+    if (this.state.phase !== "hunt") return;
+    const player = this.state.players.get(client.sessionId);
+    const body = this.state.bodies.get(client.sessionId);
+    if (!player || !body || !player.alive) return;
+    if ((this.cooldowns.get(client.sessionId) ?? 0) > 0) return;
+
+    if (player.role === "prop") {
+      const hunter = this.hunterClient();
+      if (!hunter) return;
+      // Pick an open spot a good distance away.
+      for (let i = 0; i < 30; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = DISTRACT_MIN + Math.random() * (DISTRACT_MAX - DISTRACT_MIN);
+        const x = body.x + Math.cos(a) * r;
+        const y = body.y + Math.sin(a) * r;
+        if (isBlocked(x, y, PLAYER_RADIUS)) continue;
+        hunter.send(MSG_PING, { x, y, kind: "noise" } satisfies PingEvent);
+        this.setCooldown(client.sessionId, DISTRACT_COOLDOWN);
+        return;
+      }
+    } else if (player.role === "hunter") {
+      client.send(MSG_PING, { x: body.x, y: body.y, kind: "pulse" } satisfies PingEvent);
+      this.state.players.forEach((other, id) => {
+        const ob = this.state.bodies.get(id);
+        if (!ob || other.role !== "prop" || !other.alive) return;
+        if (Math.hypot(ob.x - body.x, ob.y - body.y) > RADAR_RADIUS) return;
+        const j = () => (Math.random() * 2 - 1) * RADAR_JITTER;
+        client.send(MSG_PING, { x: ob.x + j(), y: ob.y + j(), kind: "radar" } satisfies PingEvent);
+      });
+      this.setCooldown(client.sessionId, RADAR_COOLDOWN);
+    }
   }
 
   /** Put a body on a random open spot in a random room. */

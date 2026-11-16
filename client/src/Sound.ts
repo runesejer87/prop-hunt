@@ -186,6 +186,18 @@ export class Sound {
     this.tone(880, 0.32, { type: "sine", slideTo: 700, gain: 0.07, delay: 0.2, pan });
   }
 
+  /** The hunter's radar sweep. */
+  radar() {
+    this.noise(0.7, { filter: "bandpass", freq: 300, sweepTo: 2400, q: 3, gain: 0.22, attack: 0.05 });
+    this.tone(440, 0.6, { type: "sine", slideTo: 1320, gain: 0.1, attack: 0.05 });
+  }
+
+  /** A prop sends a decoy noise. */
+  distract() {
+    this.tone(520, 0.08, { type: "square", gain: 0.06 });
+    this.tone(390, 0.1, { type: "square", gain: 0.05, delay: 0.09 });
+  }
+
   /** A countdown beep. `last` makes it higher and longer. */
   tick(last = false) {
     this.tone(last ? 880 : 520, last ? 0.28 : 0.1, { type: "square", gain: 0.1 });

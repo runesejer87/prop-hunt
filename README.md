@@ -44,6 +44,8 @@ The server runs on port 2567.
 - Props win if the timer runs out or the hunter runs out of health. The hunter wins by finding everyone.
 - Running does not work: the hunter is faster than props, a disguised prop that moves only shuffles slowly, and a prop that keeps
   moving shows up as a yellow ping near its position for the hunter every few seconds. Hiding (and holding still) is the way to win.
+- Abilities (**F**): props can **Distract** (a fake yellow ping somewhere else, 15 s cooldown); the hunter has **Radar**
+  (a blue sweep that pings every prop within about 10 tiles, even still ones, 25 s cooldown, ready 8 s into the hunt).
 - Props: **E** to become a nearby small object (it copies which way that object faces), **R** to turn it, **Q** to change back. Found props become ghosts.
 - A disguised prop that moves **wobbles** (a tell). Hold still for 1 second and it settles into a perfect copy.
 - Tuning numbers (timers, health, range) are at the top of `shared/src/index.ts`.
