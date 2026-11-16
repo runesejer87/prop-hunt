@@ -26,6 +26,7 @@ export class Hud {
   private abilityText: Phaser.GameObjects.Text;
   private warning: Phaser.GameObjects.Text;
   private touchMode = false;
+  private lobbyBtns: { key: "add" | "addEasy" | "remove"; text: Phaser.GameObjects.Text; rect: Phaser.Geom.Rectangle }[] = [];
   private timerBack: Phaser.GameObjects.Rectangle;
   private timerFill: Phaser.GameObjects.Rectangle;
   private boardBg: Phaser.GameObjects.Rectangle;
@@ -61,6 +62,19 @@ export class Hud {
       .setScrollFactor(0)
       .setDepth(d)
       .setVisible(false);
+    const mk = (key: "add" | "addEasy" | "remove", label: string, color: string) => {
+      const t = scene.add
+        .text(0, 0, label, { fontFamily: FONT, fontSize: "16px", fontStyle: "bold", color: "#ffffff", backgroundColor: color })
+        .setPadding(12, 7, 12, 7)
+        .setOrigin(0.5, 0)
+        .setScrollFactor(0)
+        .setDepth(d + 4)
+        .setVisible(false);
+      this.lobbyBtns.push({ key, text: t, rect: new Phaser.Geom.Rectangle(0, 0, 0, 0) });
+    };
+    mk("add", "+ CPU player", "#2f7d4f");
+    mk("addEasy", "+ Easy CPU", "#3a6ea5");
+    mk("remove", "− Remove CPU", "#8a3a3a");
     this.warning = text(24, "#ff6b6b").setOrigin(0.5, 0).setVisible(false);
     this.toastText = text(16).setOrigin(0, 0).setVisible(false);
     this.note = text(16).setOrigin(0.5, 1).setVisible(false);
@@ -105,6 +119,28 @@ export class Hud {
   /** On a touch screen the on-screen buttons replace the key hints and the ability label. */
   setTouchMode(on: boolean) {
     this.touchMode = on;
+  }
+
+  /** Lobby buttons for adding and removing computer players. */
+  setLobbyButtons(visible: boolean, canAdd: boolean, canRemove: boolean) {
+    const { width } = this.scene.scale;
+    const y = (this.sub.visible ? this.sub.y + this.sub.height : this.title.y + this.title.height) + 16;
+    const shown = this.lobbyBtns.filter((b) => visible && (b.key === "remove" ? canRemove : canAdd));
+    this.lobbyBtns.forEach((b) => b.text.setVisible(false));
+    const gap = 10;
+    const total = shown.reduce((n, b) => n + b.text.width, 0) + gap * Math.max(0, shown.length - 1);
+    let x = width / 2 - total / 2;
+    for (const b of shown) {
+      b.text.setPosition(x + b.text.width / 2, y).setVisible(true);
+      b.rect.setTo(x, y, b.text.width, b.text.height);
+      x += b.text.width + gap;
+    }
+  }
+
+  /** Which lobby button, if any, is at this screen position. */
+  lobbyButtonAt(x: number, y: number): "add" | "addEasy" | "remove" | null {
+    for (const b of this.lobbyBtns) if (b.text.visible && b.rect.contains(x, y)) return b.key;
+    return null;
   }
 
   /** A flashing warning under the title, or null to hide it. */
@@ -187,7 +223,7 @@ export class Hud {
     switch (info.phase) {
       case "lobby":
         title = info.playerCount < MIN_PLAYERS ? "Waiting for another player…" : `Round starts in ${info.timeLeft}`;
-        sub = "Open this page in a second tab or send the link to a friend (2–4 players)";
+        sub = "Send the link to a friend (2–4 players), or add a computer player to play alone";
         hint = "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   Tab: scores   M: sound";
         break;
       case "hide":

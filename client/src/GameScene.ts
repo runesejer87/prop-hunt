@@ -16,6 +16,9 @@ import {
   MSG_ABILITY,
   MSG_INSPECT,
   MSG_TAUNT,
+  MSG_ADD_BOT,
+  MSG_REMOVE_BOT,
+  MAX_PLAYERS,
   MSG_TAUNTED,
   type TauntEvent,
   MSG_INSPECT_RESULT,
@@ -64,6 +67,8 @@ export class GameScene extends Phaser.Scene {
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyTab!: Phaser.Input.Keyboard.Key;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private keyC!: Phaser.Input.Keyboard.Key;
+  private keyX!: Phaser.Input.Keyboard.Key;
   private touch?: TouchControls;
   private touchUsed = false;
   private baseZoom = 1;
@@ -120,6 +125,8 @@ export class GameScene extends Phaser.Scene {
     this.keyR = this.input.keyboard!.addKey("R");
     this.keyTab = this.input.keyboard!.addKey("TAB");
     this.keyF = this.input.keyboard!.addKey("F");
+    this.keyC = this.input.keyboard!.addKey("C");
+    this.keyX = this.input.keyboard!.addKey("X");
     this.input.keyboard!.addCapture("TAB");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
 
@@ -141,6 +148,11 @@ export class GameScene extends Phaser.Scene {
     // The mouse swings where it points. Fingers use the on-screen buttons instead.
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       this.touchUsed = p.wasTouch;
+      const btn = this.hud.lobbyButtonAt(p.x, p.y);
+      if (btn) {
+        this.botButton(btn);
+        return;
+      }
       if (!p.wasTouch) this.swing();
     });
     if (isTouchDevice()) {
@@ -154,6 +166,7 @@ export class GameScene extends Phaser.Scene {
         inspect: (on) => (on ? this.startInspect() : this.stopInspect()),
         mute: () => this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on"),
       });
+      this.touch.blocked = (x, y) => this.hud.lobbyButtonAt(x, y) !== null;
       this.hud.setTouchMode(true);
       if (this.scale.height > this.scale.width && this.scale.width < 700) this.hud.toast("Tip: turn your phone sideways for a better view");
     }
@@ -448,6 +461,13 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: bubble, y: bubble.y - 34, alpha: 0, scale: 1.25, duration: 1700, ease: "Quad.easeOut", onComplete: () => bubble.destroy() });
   }
 
+  /** Lobby: add or remove a computer player. */
+  private botButton(which: "add" | "addEasy" | "remove") {
+    if (!this.room || this.room.state.phase !== "lobby") return;
+    if (which === "remove") this.room.send(MSG_REMOVE_BOT, {});
+    else this.room.send(MSG_ADD_BOT, { level: which === "addEasy" ? "easy" : "normal" });
+  }
+
   private doRotate() {
     if (this.myBody?.disguise) this.room?.send(MSG_ROTATE);
   }
@@ -689,6 +709,8 @@ export class GameScene extends Phaser.Scene {
       else this.doTaunt();
     }
     if (Phaser.Input.Keyboard.JustDown(this.keyF)) this.doAbility();
+    if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.botButton("add");
+    if (Phaser.Input.Keyboard.JustDown(this.keyX)) this.botButton("remove");
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
 
     state.bodies.forEach((p: BodyState, id: string) => {
@@ -863,6 +885,11 @@ export class GameScene extends Phaser.Scene {
     const rows: BoardRow[] = [];
     state.players.forEach((p: PlayerState, id: string) => rows.push({ name: p.name, score: p.score, gain: p.gain, role: p.role, me: id === room.sessionId }));
     rows.sort((a, b) => b.score - a.score);
+    let botCount = 0;
+    state.players.forEach((p: PlayerState) => {
+      if (p.bot) botCount++;
+    });
+    this.hud.setLobbyButtons(phase === "lobby", playerCount < MAX_PLAYERS, botCount > 0);
     this.hud.setBoard(this.keyTab.isDown || !!this.touch?.scoresHeld || phase === "end", rows, state.round, phase === "end");
 
     const abilityLabel = phase === "hunt" && me.alive ? (me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;

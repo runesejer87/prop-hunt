@@ -129,6 +129,8 @@ export const PlayerState = schema(
     cooldown: t.number(),
     /** Hunter only: how far through an inspection (0 to 100). 0 when not inspecting. */
     inspect: t.number(),
+    /** A computer-controlled player. */
+    bot: t.boolean(),
     /** Seconds left of the sprint a found prop gets before it is caught or escapes. 0 when not being chased. */
     chase: t.number(),
   },
@@ -259,4 +261,11 @@ export interface TauntEvent {
   y: number;
   /** Which silly sound: 0 to TAUNT_SOUNDS - 1. */
   sound: number;
+}
+
+/** Lobby: add or remove a computer-controlled player. */
+export const MSG_ADD_BOT = "addBot";
+export const MSG_REMOVE_BOT = "removeBot";
+export interface AddBotMessage {
+  level?: "easy" | "normal";
 }

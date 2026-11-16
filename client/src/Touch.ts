@@ -55,6 +55,8 @@ export class TouchControls {
   private stickOrigin = { x: 0, y: 0 };
   private buttons = new Map<Key, Btn>();
   private mode: TouchMode = "none";
+  /** Set by the scene: true where a button of the page is, so a touch there does not start the joystick. */
+  blocked?: (x: number, y: number) => boolean;
 
   constructor(
     private scene: Phaser.Scene,
@@ -148,6 +150,7 @@ export class TouchControls {
     }
     const { width, height } = this.scene.scale;
     if (this.stickId !== null || pointer.x > width * 0.5 || pointer.y < height * 0.18) return;
+    if (this.blocked?.(pointer.x, pointer.y)) return;
     this.stickId = pointer.id;
     this.stickOrigin = { x: pointer.x, y: pointer.y };
     this.base.setPosition(pointer.x, pointer.y).setVisible(true);

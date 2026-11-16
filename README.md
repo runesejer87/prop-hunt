@@ -15,6 +15,13 @@ Pick a name on the title screen. The game keeps going round after round and the 
 least goes next). Points: the hunter gets 2 per prop found, plus 2 for finding everyone; props get 3 for surviving.
 Hold **Tab** to see the scoreboard; it also shows at the end of each round.
 
+## Computer players
+In the lobby you can add CPU players (up to 4 players in total): **+ CPU player**, **+ Easy CPU** and **− Remove CPU** buttons, or press **C** / **X**.
+A CPU prop picks a common object near it, copies it, moves to a spot among lookalikes, holds still, runs when found or inspected, and
+sometimes taunts. A CPU hunter patrols the rooms, follows pings and clues, uses its radar, and checks objects with Inspect (it never
+wastes health on blind swings). CPU players get the same messages and actions as humans (`server/src/Bot.ts`). A human joining a full
+game takes a CPU player's seat. For testing: `HUNT_TIME_OVERRIDE=60` shortens the hunt and `FORCE_BOT_HUNTER=1` makes a CPU the hunter.
+
 ## Phones and tablets
 It works on phones and iPads: a joystick appears under your left thumb, and buttons on the right change with your role
 (props: Become, Undo, Turn, Distract; hunter: Swing, hold Inspect, Radar). Several fingers work at once. Landscape is best.

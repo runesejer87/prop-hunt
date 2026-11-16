@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Room, ServerError, type Client } from "colyseus";
 import { StateView } from "@colyseus/schema";
+import { BotBrain, type BotApi, type BotLevel } from "./Bot.ts";
 import {
   GameState,
   PlayerState,
@@ -29,6 +30,9 @@ import {
   MSG_PING,
   MSG_ABILITY,
   MSG_TAUNT,
+  MSG_ADD_BOT,
+  MSG_REMOVE_BOT,
+  type AddBotMessage,
   MSG_TAUNTED,
   TAUNT_COOLDOWN,
   TAUNT_SOUNDS,
@@ -121,6 +125,28 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   private facing = new Map<string, { x: number; y: number }>();
   /** Props that were just found and are sprinting for their lives. */
   private chasing = new Map<string, { left: number; grace: number }>();
+  /** Computer-controlled players. */
+  private bots = new Map<string, BotBrain>();
+  private botCount = 0;
+  /** How long the hunt lasts. The HUNT_TIME_OVERRIDE environment variable shortens it for testing. */
+  private huntTime = Number(process.env.HUNT_TIME_OVERRIDE) || HUNT_TIME;
+  /** What a CPU player can do and see: the same things a human can. */
+  private botApi: BotApi = {
+    map: undefined as unknown as GameMap, // replaced by the getter below
+    phase: () => this.state.phase,
+    now: () => this.clock.currentTime / 1000,
+    player: (id) => this.state.players.get(id),
+    body: (id) => this.state.bodies.get(id),
+    players: () => this.players(),
+    setInput: (id, dx, dy) => this.moveInputs.set(id, { dx: clamp(dx, -1, 1), dy: clamp(dy, -1, 1) }),
+    disguise: (id) => this.doDisguise(id),
+    undisguise: (id) => this.doUndisguise(id),
+    taunt: (id) => this.doTaunt(id),
+    ability: (id) => this.useAbility(id),
+    attack: (id) => this.handleAttack(id, { x: 0, y: 0 }),
+    inspect: (id, on) => this.doInspect(id, on),
+    visibleTo: (hunterId) => this.visibleProps(hunterId),
+  };
   /** Time (seconds, room clock) before which a prop that just escaped cannot disguise. */
   private lockUntil = new Map<string, number>();
   /** How many chases each prop has escaped this round. */
@@ -130,6 +156,11 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   /** Seconds into the hunt at which the next tightening sweep happens. */
   private nextSweepAt = 0;
 
+  constructor() {
+    super();
+    Object.defineProperty(this.botApi, "map", { get: () => this.map });
+  }
+
   messages = {
     [MSG_INPUT]: (client: Client, msg: InputMessage) => {
       // Each part is -1 to 1. Keyboards send whole numbers; a touch joystick sends anything in between.
@@ -138,38 +169,55 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         dy: clamp(Number(msg?.dy) || 0, -1, 1),
       });
     },
-    [MSG_DISGUISE]: (client: Client) => {
-      const player = this.state.players.get(client.sessionId);
-      const body = this.state.bodies.get(client.sessionId);
-      if (!player || !body || player.role !== "prop" || !player.alive) return;
-      if (this.chasing.has(client.sessionId) || this.clock.currentTime / 1000 < (this.lockUntil.get(client.sessionId) ?? 0)) return;
-      const prop = this.map.nearestDisguisableProp(body.x, body.y);
-      if (prop && PROP_TYPES[prop.type]) {
-        if (body.disguise !== prop.type || body.rot !== prop.rot) this.stillFor.set(client.sessionId, 0);
-        body.disguise = prop.type;
-        body.rot = prop.rot;
-        this.puffClue(body);
-      }
-    },
-    [MSG_ROTATE]: (client: Client) => {
-      const player = this.state.players.get(client.sessionId);
-      const body = this.state.bodies.get(client.sessionId);
-      if (!player || !body || !body.disguise || !player.alive) return;
-      body.rot = (body.rot + 1) % 4;
-      this.stillFor.set(client.sessionId, 0); // changing shape makes you wobble again
-    },
-    [MSG_UNDISGUISE]: (client: Client) => {
-      const body = this.state.bodies.get(client.sessionId);
-      if (body) {
-        if (body.disguise) this.puffClue(body);
-        this.clearDisguise(client.sessionId, body);
-      }
-    },
+    [MSG_DISGUISE]: (client: Client) => this.doDisguise(client.sessionId),
+    [MSG_ROTATE]: (client: Client) => this.doRotate(client.sessionId),
+    [MSG_UNDISGUISE]: (client: Client) => this.doUndisguise(client.sessionId),
     [MSG_ATTACK]: (client: Client, msg: AttackMessage) => this.handleAttack(client.sessionId, msg),
-    [MSG_ABILITY]: (client: Client) => this.useAbility(client),
-    [MSG_INSPECT]: (client: Client, msg: InspectMessage) => this.handleInspect(client, msg),
-    [MSG_TAUNT]: (client: Client) => this.handleTaunt(client),
+    [MSG_ABILITY]: (client: Client) => this.useAbility(client.sessionId),
+    [MSG_INSPECT]: (client: Client, msg: InspectMessage) => this.doInspect(client.sessionId, !!msg?.on),
+    [MSG_TAUNT]: (client: Client) => this.doTaunt(client.sessionId),
+    [MSG_ADD_BOT]: (_client: Client, msg: AddBotMessage) => this.addBot(msg?.level === "easy" ? "easy" : "normal"),
+    [MSG_REMOVE_BOT]: () => this.removeBot(),
   };
+
+  // --------------------------------------------------- actions (by player id)
+  // Humans and CPU players both go through these.
+
+  /** Send something to one player: a browser, or a CPU player's brain. */
+  private sendTo(id: string, type: string, payload: unknown) {
+    const client = this.clients.find((c) => c.sessionId === id);
+    if (client) client.send(type, payload);
+    else this.bots.get(id)?.hear(type, payload);
+  }
+
+  private doDisguise(id: string) {
+    const player = this.state.players.get(id);
+    const body = this.state.bodies.get(id);
+    if (!player || !body || player.role !== "prop" || !player.alive) return;
+    if (this.chasing.has(id) || this.clock.currentTime / 1000 < (this.lockUntil.get(id) ?? 0)) return;
+    const prop = this.map.nearestDisguisableProp(body.x, body.y);
+    if (prop && PROP_TYPES[prop.type]) {
+      if (body.disguise !== prop.type || body.rot !== prop.rot) this.stillFor.set(id, 0);
+      body.disguise = prop.type;
+      body.rot = prop.rot;
+      this.puffClue(body);
+    }
+  }
+
+  private doRotate(id: string) {
+    const player = this.state.players.get(id);
+    const body = this.state.bodies.get(id);
+    if (!player || !body || !body.disguise || !player.alive) return;
+    body.rot = (body.rot + 1) % 4;
+    this.stillFor.set(id, 0); // changing shape makes you wobble again
+  }
+
+  private doUndisguise(id: string) {
+    const body = this.state.bodies.get(id);
+    if (!body) return;
+    if (body.disguise) this.puffClue(body);
+    this.clearDisguise(id, body);
+  }
 
   /**
    * Only people who know the password may join. Set it with the GAME_PASSWORD environment
@@ -202,6 +250,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   }
 
   onJoin(client: Client, options?: { name?: unknown }) {
+    // A human takes a CPU player's seat if the game is full.
+    if (this.players().length >= MAX_PLAYERS) this.removeBot();
     const player = new PlayerState();
     player.id = client.sessionId;
     player.name = this.cleanName(options?.name);
@@ -228,18 +278,75 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   }
 
   onLeave(client: Client) {
-    this.state.players.delete(client.sessionId);
-    this.state.bodies.delete(client.sessionId);
-    this.moveInputs.delete(client.sessionId);
-    this.stillFor.delete(client.sessionId);
-    this.noise.delete(client.sessionId);
-    this.hunts.delete(client.sessionId);
-    this.cooldowns.delete(client.sessionId);
-    this.facing.delete(client.sessionId);
-    this.chasing.delete(client.sessionId);
-    this.lockUntil.delete(client.sessionId);
-    this.escapes.delete(client.sessionId);
-    this.tauntReadyAt.delete(client.sessionId);
+    this.forget(client.sessionId);
+  }
+
+  /** Remove everything we know about a player. */
+  private forget(id: string) {
+    this.state.players.delete(id);
+    this.state.bodies.delete(id);
+    this.moveInputs.delete(id);
+    this.stillFor.delete(id);
+    this.noise.delete(id);
+    this.hunts.delete(id);
+    this.cooldowns.delete(id);
+    this.facing.delete(id);
+    this.chasing.delete(id);
+    this.lockUntil.delete(id);
+    this.escapes.delete(id);
+    this.tauntReadyAt.delete(id);
+    this.bots.delete(id);
+  }
+
+  // ------------------------------------------------------------- CPU players
+
+  private static readonly BOT_NAMES = ["Ava", "Ben", "Cleo", "Dax", "Eli", "Fay"];
+
+  /** Add a computer-controlled player (in the lobby, if there is room). */
+  private addBot(level: BotLevel) {
+    if (this.state.phase !== "lobby" || this.players().length >= MAX_PLAYERS) return;
+    const id = `cpu_${++this.botCount}_${Math.random().toString(36).slice(2, 6)}`;
+    const player = new PlayerState();
+    player.id = id;
+    const taken = new Set(this.players().map((p) => p.name));
+    const name = PropHuntRoom.BOT_NAMES.map((n) => `CPU ${n}`).find((n) => !taken.has(n)) ?? `CPU ${this.botCount}`;
+    player.name = name;
+    player.bot = true;
+    player.score = 0;
+    player.gain = 0;
+    player.hp = HUNTER_MAX_HP;
+    player.role = "prop";
+    player.alive = true;
+    const body = new BodyState();
+    body.disguise = "";
+    body.rot = 0;
+    body.settled = false;
+    this.placeRandomly(body);
+    this.state.players.set(id, player);
+    this.state.bodies.set(id, body);
+    this.bots.set(id, new BotBrain(id, level, this.botApi));
+  }
+
+  /** Remove a computer-controlled player (the newest one), if the game is in the lobby or someone needs the seat. */
+  private removeBot() {
+    const id = [...this.bots.keys()].pop();
+    if (!id) return;
+    this.cancelInspect(false);
+    this.forget(id);
+  }
+
+  /** The ids of props the hunter can see right now, by the same rule a human hunter gets. */
+  private visibleProps(hunterId: string): string[] {
+    const hb = this.state.bodies.get(hunterId);
+    if (!hb) return [];
+    const sight = new Sight(this.map, hb.x, hb.y, VISION_RADIUS + REVEAL_MARGIN);
+    const out: string[] = [];
+    this.state.bodies.forEach((body, id) => {
+      const other = this.state.players.get(id);
+      if (!other || other.role !== "prop" || !other.alive) return;
+      if (this.hunterCanSee(sight, hb, body, false)) out.push(id);
+    });
+    return out;
   }
 
   // ------------------------------------------------------------ visibility
@@ -316,7 +423,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const all = this.players();
     // The player who has been hunter the fewest times goes next (ties are random).
     const fewest = Math.min(...all.map((p) => this.hunts.get(p.id) ?? 0));
-    const candidates = all.filter((p) => (this.hunts.get(p.id) ?? 0) === fewest);
+    let candidates = all.filter((p) => (this.hunts.get(p.id) ?? 0) === fewest);
+    // Testing only: FORCE_BOT_HUNTER=1 makes a CPU player the hunter whenever there is one.
+    if (process.env.FORCE_BOT_HUNTER === "1" && all.some((p) => p.bot)) candidates = all.filter((p) => p.bot);
     const chosen = candidates[Math.floor(Math.random() * candidates.length)]!;
     this.hunts.set(chosen.id, fewest + 1);
     this.state.round += 1;
@@ -341,6 +450,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     });
     this.moveInputs.clear();
     this.cancelInspect(false);
+    this.bots.forEach((b) => b.reset());
     this.chasing.clear();
     this.lockUntil.clear();
     this.escapes.clear();
@@ -408,7 +518,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       this.state.timeLeft = Math.max(0, Math.ceil(this.clockLeft));
 
       if (phase === "hide" && this.clockLeft <= 0) {
-        this.setPhase("hunt", HUNT_TIME);
+        this.setPhase("hunt", this.huntTime);
         // Abilities start ready, except the hunter's radar which needs a few seconds.
         for (const p of this.players()) this.setCooldown(p.id, p.role === "hunter" ? RADAR_START_DELAY : 0);
       } else if (phase === "end" && this.clockLeft <= 0) {
@@ -422,6 +532,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.tickCooldowns(dt);
     this.tickInspect(dt);
     this.tickChase(dt);
+    this.bots.forEach((b) => b.update(dt));
     this.updateTightening();
     this.movePlayers(dt);
     this.syncViews();
@@ -528,7 +639,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.clearDisguise(id, body);
     this.chasing.set(id, { left: CHASE_TIME, grace: CHASE_HEAD_START });
     player.chase = CHASE_TIME;
-    this.clients.find((c) => c.sessionId === id)?.send(MSG_ALERT, { active: false } satisfies AlertMessage);
+    this.sendTo(id, MSG_ALERT, { active: false } satisfies AlertMessage);
     this.broadcast(MSG_SWING, { x, y, result: "caught" } satisfies SwingEvent);
   }
 
@@ -573,26 +684,26 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
    * hunter cannot move. Ordinary objects come back "clear" at no cost. A hiding player is found.
    * The player is warned and can slip away, which also gives them away.
    */
-  private handleInspect(client: Client, msg: InspectMessage) {
-    const hunter = this.state.players.get(client.sessionId);
-    const hunterBody = this.state.bodies.get(client.sessionId);
+  private doInspect(id: string, on: boolean) {
+    const hunter = this.state.players.get(id);
+    const hunterBody = this.state.bodies.get(id);
     if (!hunter || !hunterBody || hunter.role !== "hunter") return;
-    if (!msg?.on) {
-      if (this.inspecting?.hunterId === client.sessionId) this.cancelInspect(false);
+    if (!on) {
+      if (this.inspecting?.hunterId === id) this.cancelInspect(false);
       return;
     }
     if (this.state.phase !== "hunt" || this.inspecting) return;
 
-    const front = this.frontTarget(client.sessionId, hunterBody);
+    const front = this.frontTarget(id, hunterBody);
     const aim = { x: front.x, y: front.y };
     const hit = front.hit;
     if (!hit) {
-      client.send(MSG_INSPECT_RESULT, { x: aim.x, y: aim.y, result: "none" } satisfies InspectResult);
+      this.sendTo(id, MSG_INSPECT_RESULT, { x: aim.x, y: aim.y, result: "none" } satisfies InspectResult);
       return;
     }
     const targetBody = hit.kind === "player" && hit.id ? this.state.bodies.get(hit.id) : undefined;
     this.inspecting = {
-      hunterId: client.sessionId,
+      hunterId: id,
       kind: hit.kind,
       targetId: hit.id,
       propId: hit.propId,
@@ -602,9 +713,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       startY: targetBody?.y ?? aim.y,
       left: INSPECT_TIME,
     };
-    this.moveInputs.set(client.sessionId, { dx: 0, dy: 0 });
+    this.moveInputs.set(id, { dx: 0, dy: 0 });
     // Tell the player being inspected.
-    if (hit.id) this.clients.find((c) => c.sessionId === hit.id)?.send(MSG_ALERT, { active: true } satisfies AlertMessage);
+    if (hit.id) this.sendTo(hit.id, MSG_ALERT, { active: true } satisfies AlertMessage);
   }
 
   /** Stop an inspection. `reveal`: the target moved, which gives it away. */
@@ -614,13 +725,12 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.inspecting = undefined;
     const hunter = this.state.players.get(ins.hunterId);
     if (hunter) hunter.inspect = 0;
-    if (ins.targetId) this.clients.find((c) => c.sessionId === ins.targetId)?.send(MSG_ALERT, { active: false } satisfies AlertMessage);
-    const hunterClient = this.clients.find((c) => c.sessionId === ins.hunterId);
+    if (ins.targetId) this.sendTo(ins.targetId, MSG_ALERT, { active: false } satisfies AlertMessage);
     if (reveal && ins.targetId) {
       const tb = this.state.bodies.get(ins.targetId);
-      if (tb && hunterClient) {
-        hunterClient.send(MSG_INSPECT_RESULT, { x: tb.x, y: tb.y, result: "moved" } satisfies InspectResult);
-        hunterClient.send(MSG_PING, { x: tb.x, y: tb.y, kind: "radar" } satisfies PingEvent);
+      if (tb) {
+        this.sendTo(ins.hunterId, MSG_INSPECT_RESULT, { x: tb.x, y: tb.y, result: "moved" } satisfies InspectResult);
+        this.sendTo(ins.hunterId, MSG_PING, { x: tb.x, y: tb.y, kind: "radar" } satisfies PingEvent);
       }
     }
   }
@@ -646,13 +756,12 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     if (ins.left > 0) return;
 
     // Done.
-    const hunterClient = this.clients.find((c) => c.sessionId === ins.hunterId);
     this.cancelInspect(false);
     if (ins.kind === "player" && ins.targetId) {
       this.startChase(ins.targetId, ins.startX, ins.startY);
-      hunterClient?.send(MSG_INSPECT_RESULT, { x: ins.startX, y: ins.startY, result: "found" } satisfies InspectResult);
+      this.sendTo(ins.hunterId, MSG_INSPECT_RESULT, { x: ins.startX, y: ins.startY, result: "found" } satisfies InspectResult);
     } else {
-      hunterClient?.send(MSG_INSPECT_RESULT, { x: ins.x, y: ins.y, result: "clear", propId: ins.propId } satisfies InspectResult);
+      this.sendTo(ins.hunterId, MSG_INSPECT_RESULT, { x: ins.x, y: ins.y, result: "clear", propId: ins.propId } satisfies InspectResult);
     }
   }
 
@@ -662,20 +771,19 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
    * Space as a prop: make a silly sound that everyone hears, from where you are. It is funny, but it
    * gives you away: the hunter is told roughly (not exactly) where it came from.
    */
-  private handleTaunt(client: Client) {
-    const player = this.state.players.get(client.sessionId);
-    const body = this.state.bodies.get(client.sessionId);
+  private doTaunt(id: string) {
+    const player = this.state.players.get(id);
+    const body = this.state.bodies.get(id);
     if (!player || !body || player.role !== "prop" || this.state.phase === "end") return;
     const now = this.clock.currentTime / 1000;
-    if (now < (this.tauntReadyAt.get(client.sessionId) ?? 0)) return;
-    this.tauntReadyAt.set(client.sessionId, now + TAUNT_COOLDOWN);
+    if (now < (this.tauntReadyAt.get(id) ?? 0)) return;
+    this.tauntReadyAt.set(id, now + TAUNT_COOLDOWN);
 
     const sound = Math.floor(Math.random() * TAUNT_SOUNDS);
     const j = () => (Math.random() * 2 - 1) * TAUNT_JITTER;
-    for (const c of this.clients) {
-      const role = this.state.players.get(c.sessionId)?.role;
-      const fuzzy = role === "hunter" && c.sessionId !== client.sessionId;
-      c.send(MSG_TAUNTED, { x: body.x + (fuzzy ? j() : 0), y: body.y + (fuzzy ? j() : 0), sound } satisfies TauntEvent);
+    for (const other of this.players()) {
+      const fuzzy = other.role === "hunter" && other.id !== id;
+      this.sendTo(other.id, MSG_TAUNTED, { x: body.x + (fuzzy ? j() : 0), y: body.y + (fuzzy ? j() : 0), sound } satisfies TauntEvent);
     }
   }
 
@@ -687,7 +795,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (this.state.alert !== 0) this.state.alert = 0;
       return;
     }
-    const elapsed = HUNT_TIME - this.clockLeft;
+    const elapsed = this.huntTime - this.clockLeft;
     const level = elapsed >= TIGHTEN_AT[1] ? 2 : elapsed >= TIGHTEN_AT[0] ? 1 : 0;
     if (level !== this.state.alert) {
       this.state.alert = level;
@@ -701,7 +809,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
 
   /** Tell the hunter roughly where every prop is: a circle that holds the prop somewhere inside. */
   private sweep(level: number) {
-    const hunter = this.hunterClient();
+    const hunter = this.hunterId();
     if (!hunter) return;
     const r = SWEEP_RADIUS[level - 1]!;
     for (const p of this.players()) {
@@ -709,18 +817,18 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!body || p.role !== "prop" || !p.alive) continue;
       const a = Math.random() * Math.PI * 2;
       const d = Math.sqrt(Math.random()) * r * 0.7;
-      hunter.send(MSG_PING, { x: body.x + Math.cos(a) * d, y: body.y + Math.sin(a) * d, kind: "area", r } satisfies PingEvent);
+      this.sendTo(hunter, MSG_PING, { x: body.x + Math.cos(a) * d, y: body.y + Math.sin(a) * d, kind: "area", r } satisfies PingEvent);
     }
   }
 
   /** A puff of dust near where someone just disguised or undisguised, if the hunter is close. */
   private puffClue(body: BodyState) {
     if (this.state.phase !== "hunt") return;
-    const hunter = this.hunterClient();
-    const hb = hunter ? this.state.bodies.get(hunter.sessionId) : undefined;
+    const hunter = this.hunterId();
+    const hb = hunter ? this.state.bodies.get(hunter) : undefined;
     if (!hunter || !hb || Math.hypot(body.x - hb.x, body.y - hb.y) > CLUE_RADIUS) return;
     const j = () => (Math.random() * 2 - 1) * CLUE_JITTER;
-    hunter.send(MSG_PING, { x: body.x + j(), y: body.y + j(), kind: "dust" } satisfies PingEvent);
+    this.sendTo(hunter, MSG_PING, { x: body.x + j(), y: body.y + j(), kind: "dust" } satisfies PingEvent);
   }
 
   // ------------------------------------------------------------- movement
@@ -765,16 +873,16 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     });
   }
 
-  private hunterClient() {
-    return this.clients.find((c) => this.state.players.get(c.sessionId)?.role === "hunter");
+  private hunterId(): string | undefined {
+    return this.players().find((p) => p.role === "hunter")?.id;
   }
 
   /** Tell the hunter (only) about a spot near this prop. */
   private sendPing(body: BodyState) {
-    const hunter = this.hunterClient();
+    const hunter = this.hunterId();
     if (!hunter) return;
     const j = () => (Math.random() * 2 - 1) * PING_JITTER;
-    hunter.send(MSG_PING, { x: body.x + j(), y: body.y + j(), kind: "noise" } satisfies PingEvent);
+    this.sendTo(hunter, MSG_PING, { x: body.x + j(), y: body.y + j(), kind: "noise" } satisfies PingEvent);
   }
 
   // ------------------------------------------------------------- abilities
@@ -799,15 +907,15 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
    * F key. Props: "Distract" sends the hunter a fake noise somewhere else, which looks just like a
    * real one. Hunter: "Radar" pings every prop close by, even hidden, still ones, but not exactly.
    */
-  private useAbility(client: Client) {
+  private useAbility(id: string) {
     if (this.state.phase !== "hunt") return;
-    const player = this.state.players.get(client.sessionId);
-    const body = this.state.bodies.get(client.sessionId);
+    const player = this.state.players.get(id);
+    const body = this.state.bodies.get(id);
     if (!player || !body || !player.alive) return;
-    if ((this.cooldowns.get(client.sessionId) ?? 0) > 0) return;
+    if ((this.cooldowns.get(id) ?? 0) > 0) return;
 
     if (player.role === "prop") {
-      const hunter = this.hunterClient();
+      const hunter = this.hunterId();
       if (!hunter) return;
       // Pick an open spot a good distance away.
       for (let i = 0; i < 30; i++) {
@@ -816,20 +924,20 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         const x = body.x + Math.cos(a) * r;
         const y = body.y + Math.sin(a) * r;
         if (this.map.isBlocked(x, y, PLAYER_RADIUS)) continue;
-        hunter.send(MSG_PING, { x, y, kind: "noise" } satisfies PingEvent);
-        this.setCooldown(client.sessionId, DISTRACT_COOLDOWN);
+        this.sendTo(hunter, MSG_PING, { x, y, kind: "noise" } satisfies PingEvent);
+        this.setCooldown(id, DISTRACT_COOLDOWN);
         return;
       }
     } else if (player.role === "hunter") {
-      client.send(MSG_PING, { x: body.x, y: body.y, kind: "pulse" } satisfies PingEvent);
-      this.state.players.forEach((other, id) => {
-        const ob = this.state.bodies.get(id);
+      this.sendTo(id, MSG_PING, { x: body.x, y: body.y, kind: "pulse" } satisfies PingEvent);
+      this.state.players.forEach((other, otherId) => {
+        const ob = this.state.bodies.get(otherId);
         if (!ob || other.role !== "prop" || !other.alive) return;
         if (Math.hypot(ob.x - body.x, ob.y - body.y) > RADAR_RADIUS) return;
         const j = () => (Math.random() * 2 - 1) * RADAR_JITTER;
-        client.send(MSG_PING, { x: ob.x + j(), y: ob.y + j(), kind: "radar" } satisfies PingEvent);
+        this.sendTo(id, MSG_PING, { x: ob.x + j(), y: ob.y + j(), kind: "radar" } satisfies PingEvent);
       });
-      this.setCooldown(client.sessionId, RADAR_COOLDOWN_BY_LEVEL[this.state.alert] ?? RADAR_COOLDOWN_BY_LEVEL[0]);
+      this.setCooldown(id, RADAR_COOLDOWN_BY_LEVEL[this.state.alert] ?? RADAR_COOLDOWN_BY_LEVEL[0]);
     }
   }
 
