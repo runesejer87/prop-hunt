@@ -239,7 +239,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.timeLeft = 0;
     this.state.winner = "";
     this.state.round = 0;
-    this.setSimulationInterval((deltaMs) => this.update(deltaMs / 1000), 1000 / TICK_RATE);
+    // A slow tick must not make everyone jump: cap how much time one step covers.
+    this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000), 1000 / TICK_RATE);
   }
 
   /** A tidy display name: letters, numbers, spaces and a few symbols, not too long. */
@@ -275,6 +276,18 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     // Each client gets its own view of the bodies; see syncViews().
     client.view = new StateView();
     client.view.add(body);
+  }
+
+  /** A dropped connection (bad wifi, phone sleeping): keep the player's seat for a while. */
+  async onDrop(client: Client) {
+    this.moveInputs.delete(client.sessionId); // stand still while gone
+    await this.allowReconnection(client, 30);
+  }
+
+  onReconnect(client: Client) {
+    const body = this.state.bodies.get(client.sessionId);
+    if (!client.view) client.view = new StateView();
+    if (body) client.view.add(body);
   }
 
   onLeave(client: Client) {
@@ -867,9 +880,17 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const len = Math.hypot(input.dx, input.dy);
       const step = moveSpeed(player.role, !!body.disguise, this.chasing.has(id)) * dt * Math.min(1, len);
       this.facing.set(id, { x: input.dx / len, y: input.dy / len });
-      const next = this.map.moveWithCollision(body.x, body.y, (input.dx / len) * step, (input.dy / len) * step, PLAYER_RADIUS);
-      body.x = next.x;
-      body.y = next.y;
+      // Walk in small pieces so a long step can never pass through a wall.
+      const pieces = Math.max(1, Math.ceil(step / 6));
+      let x = body.x;
+      let y = body.y;
+      for (let i = 0; i < pieces; i++) {
+        const n = this.map.moveWithCollision(x, y, ((input.dx / len) * step) / pieces, ((input.dy / len) * step) / pieces, PLAYER_RADIUS);
+        x = n.x;
+        y = n.y;
+      }
+      body.x = x;
+      body.y = y;
     });
   }
 

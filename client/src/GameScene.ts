@@ -290,6 +290,15 @@ export class GameScene extends Phaser.Scene {
       this.beingInspected = a.active;
       if (a.active) this.sfx.alarm();
     });
+    room.onDrop(() => {
+      this.connected = false;
+      this.hud.toast("Connection lost, reconnecting…");
+    });
+    room.onReconnect(() => {
+      this.connected = true;
+      this.lastInput = { dx: 0, dy: 0 };
+      this.hud.toast("Reconnected");
+    });
     room.onLeave(() => {
       this.connected = false;
     });
@@ -721,8 +730,9 @@ export class GameScene extends Phaser.Scene {
 
       if (id !== room.sessionId) {
         // Other players: glide toward the latest server position.
-        dot.x = Phaser.Math.Linear(dot.x, p.x, 0.3);
-        dot.y = Phaser.Math.Linear(dot.y, p.y, 0.3);
+        const k = 1 - Math.pow(0.7, Math.min(delta, 100) / 16.7); // same glide at any frame rate
+        dot.x = Phaser.Math.Linear(dot.x, p.x, k);
+        dot.y = Phaser.Math.Linear(dot.y, p.y, k);
         return;
       }
 
@@ -731,18 +741,29 @@ export class GameScene extends Phaser.Scene {
       const len = Math.hypot(dx, dy);
       const moving = len > 0.05;
       if (moving) {
-        const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0) * delta * Math.min(1, len)) / 1000;
-        const next = this.map.moveWithCollision(dot.x, dot.y, (dx / len) * step, (dy / len) * step, PLAYER_RADIUS);
-        dot.setPosition(next.x, next.y);
+        const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0) * Math.min(delta, 50) * Math.min(1, len)) / 1000;
+        const pieces = Math.max(1, Math.ceil(step / 6));
+        let x = dot.x;
+        let y = dot.y;
+        for (let i = 0; i < pieces; i++) {
+          const n = this.map.moveWithCollision(x, y, ((dx / len) * step) / pieces, ((dy / len) * step) / pieces, PLAYER_RADIUS);
+          x = n.x;
+          y = n.y;
+        }
+        dot.setPosition(x, y);
       }
 
-      // Correct drift toward the server's version of events.
+      // Correct drift toward the server's version of events. The server is always a
+      // little behind while we move, so only pull when the gap is big, and pull gently.
       const err = Math.hypot(p.x - dot.x, p.y - dot.y);
-      if (err > 120) {
-        dot.setPosition(p.x, p.y); // far off: snap
+      if (err > 400) {
+        dot.setPosition(p.x, p.y); // really far off (e.g. pushed by the game): snap
       } else if (!moving) {
         dot.x = Phaser.Math.Linear(dot.x, p.x, 0.2); // standing still: settle
         dot.y = Phaser.Math.Linear(dot.y, p.y, 0.2);
+      } else if (err > 60) {
+        dot.x = Phaser.Math.Linear(dot.x, p.x, 0.08);
+        dot.y = Phaser.Math.Linear(dot.y, p.y, 0.08);
       }
     });
 
