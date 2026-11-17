@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
+import { Lobby, type LobbyPlayer } from "./Lobby.ts";
+import { logOut } from "./gate.ts";
 import { Hud, type BoardRow } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
 import { TouchControls, isTouchDevice } from "./Touch.ts";
@@ -18,6 +20,7 @@ import {
   MSG_TAUNT,
   MSG_ADD_BOT,
   MSG_REMOVE_BOT,
+  MSG_READY,
   MAX_PLAYERS,
   MSG_TAUNTED,
   type TauntEvent,
@@ -54,6 +57,7 @@ export class GameScene extends Phaser.Scene {
   private hud!: Hud;
   private fog!: Fog;
   private connected = false;
+  private lobby!: Lobby;
   private styleOf = new Map<string, string>();
   private reticle!: Phaser.GameObjects.Graphics;
   private hunterView!: Phaser.GameObjects.Graphics;
@@ -142,6 +146,12 @@ export class GameScene extends Phaser.Scene {
     this.scale.on("resize", fitVignette);
     // (No camera zoom: it would also shrink and shift the on-screen buttons and text.)
     this.hud = new Hud(this);
+    this.lobby = new Lobby({
+      ready: (on) => this.room?.send(MSG_READY, { ready: on }),
+      addBot: (level) => this.botButton(level === "easy" ? "addEasy" : "add"),
+      removeBot: () => this.botButton("remove"),
+      logOut,
+    });
     this.reticle = this.add.graphics().setDepth(60);
     // Props can see exactly what the hunter can see (a faint red glow on the floor).
     this.hunterView = this.add.graphics().setDepth(3);
@@ -910,7 +920,10 @@ export class GameScene extends Phaser.Scene {
     state.players.forEach((p: PlayerState) => {
       if (p.bot) botCount++;
     });
-    this.hud.setLobbyButtons(phase === "lobby", playerCount < MAX_PLAYERS, botCount > 0);
+    this.hud.setLobbyButtons(false, false, false); // the lobby card has these buttons now
+    const lobbyRows: LobbyPlayer[] = [];
+    state.players.forEach((p: PlayerState, id: string) => lobbyRows.push({ name: p.name, ready: p.ready, bot: p.bot, me: id === room.sessionId, score: p.score }));
+    this.lobby.update(phase === "lobby", lobbyRows, state.timeLeft);
     this.hud.setBoard(this.keyTab.isDown || !!this.touch?.scoresHeld || phase === "end", rows, state.round, phase === "end");
 
     const abilityLabel = phase === "hunt" && me.alive ? (me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;

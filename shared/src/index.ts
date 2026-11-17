@@ -70,7 +70,8 @@ export type Role = "prop" | "hunter" | "spectator";
 export type Phase = "lobby" | "hide" | "hunt" | "end";
 
 /** Round timing, in seconds. */
-export const LOBBY_COUNTDOWN = 5;
+/** Seconds between everyone being ready and the round starting. */
+export const LOBBY_COUNTDOWN = 3;
 export const HIDE_TIME = 15;
 export const HUNT_TIME = 180;
 export const END_TIME = 10;
@@ -131,6 +132,8 @@ export const PlayerState = schema(
     inspect: t.number(),
     /** A computer-controlled player. */
     bot: t.boolean(),
+    /** Pressed Ready in the lobby (CPU players are always ready). */
+    ready: t.boolean(),
     /** Seconds left of the sprint a found prop gets before it is caught or escapes. 0 when not being chased. */
     chase: t.number(),
   },
@@ -264,6 +267,7 @@ export interface TauntEvent {
 }
 
 /** Lobby: add or remove a computer-controlled player. */
+export const MSG_READY = "ready";
 export const MSG_ADD_BOT = "addBot";
 export const MSG_REMOVE_BOT = "removeBot";
 export interface AddBotMessage {

@@ -71,7 +71,7 @@ function titleScreen(firstMessage: string, needPassword: boolean): Promise<Room<
         const name = nameInput.value.trim();
         const room = await tryJoin(name, pwInput.value);
         save("local", NAME_KEY, name);
-        save("session", PASSWORD_KEY, pwInput.value);
+        save("local", PASSWORD_KEY, pwInput.value);
         gate.remove();
         resolve(room);
       } catch (e) {
@@ -91,10 +91,22 @@ export async function joinGame(): Promise<Room<any, GameState>> {
   const name = load("local", NAME_KEY);
   if (name) {
     try {
-      return await tryJoin(name, load("session", PASSWORD_KEY));
+      return await tryJoin(name, load("local", PASSWORD_KEY));
     } catch (e) {
       return titleScreen(isWrongPassword(e) ? "This game is private. Enter the password." : "Could not reach the game server.", isWrongPassword(e));
     }
   }
   return titleScreen("", false);
+}
+
+/** Forget the saved name and password and go back to the title screen. */
+export function logOut() {
+  try {
+    localStorage.removeItem(NAME_KEY);
+    localStorage.removeItem(PASSWORD_KEY);
+    sessionStorage.removeItem(PASSWORD_KEY);
+  } catch {
+    /* ignore */
+  }
+  location.reload();
 }

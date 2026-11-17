@@ -222,9 +222,7 @@ export class Hud {
 
     switch (info.phase) {
       case "lobby":
-        title = info.playerCount < MIN_PLAYERS ? "Waiting for another player…" : `Round starts in ${info.timeLeft}`;
-        sub = "Send the link to a friend (2–4 players), or add a computer player to play alone";
-        hint = "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   Tab: scores   M: sound";
+        // The lobby card (Lobby.ts) shows everything now.
         break;
       case "hide":
         title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;

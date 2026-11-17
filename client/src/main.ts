@@ -19,3 +19,8 @@ game.scene.add("GameScene", GameScene, true, { room });
 
 // Handy for debugging in the browser console during development.
 if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;
+
+// Make the game installable (PWA). Skipped in dev so it never serves stale files.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}

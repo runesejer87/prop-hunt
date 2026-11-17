@@ -31,6 +31,7 @@ import {
   MSG_ABILITY,
   MSG_TAUNT,
   MSG_ADD_BOT,
+  MSG_READY,
   MSG_REMOVE_BOT,
   type AddBotMessage,
   MSG_TAUNTED,
@@ -178,6 +179,10 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     [MSG_TAUNT]: (client: Client) => this.doTaunt(client.sessionId),
     [MSG_ADD_BOT]: (_client: Client, msg: AddBotMessage) => this.addBot(msg?.level === "easy" ? "easy" : "normal"),
     [MSG_REMOVE_BOT]: () => this.removeBot(),
+    [MSG_READY]: (client: Client, msg: { ready?: boolean }) => {
+      const p = this.state.players.get(client.sessionId);
+      if (p && this.state.phase === "lobby") p.ready = msg?.ready ?? !p.ready;
+    },
   };
 
   // --------------------------------------------------- actions (by player id)
@@ -258,6 +263,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.name = this.cleanName(options?.name);
     player.score = 0;
     player.gain = 0;
+    player.ready = false;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
@@ -325,6 +331,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const name = PropHuntRoom.BOT_NAMES.map((n) => `CPU ${n}`).find((n) => !taken.has(n)) ?? `CPU ${this.botCount}`;
     player.name = name;
     player.bot = true;
+    player.ready = true;
     player.score = 0;
     player.gain = 0;
     player.hp = HUNTER_MAX_HP;
@@ -503,6 +510,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const body = this.state.bodies.get(p.id)!;
       p.role = "prop";
       p.alive = true;
+      p.ready = p.bot;
       p.hp = HUNTER_MAX_HP;
       this.clearDisguise(p.id, body);
       this.placeRandomly(body);
@@ -517,7 +525,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const players = this.players();
 
     if (phase === "lobby") {
-      if (players.length >= MIN_PLAYERS) {
+      if (players.length >= MIN_PLAYERS && players.every((p) => p.ready)) {
         if (this.clockLeft <= 0) this.clockLeft = LOBBY_COUNTDOWN;
         this.clockLeft -= dt;
         this.state.timeLeft = Math.max(0, Math.ceil(this.clockLeft));

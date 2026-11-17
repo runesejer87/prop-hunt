@@ -97,3 +97,9 @@ Playable first version. Next ideas: a trial with friends to tune the numbers, re
 Two Vercel projects from this repo:
 - `prop-hunt-server` – root directory `server` (Colyseus as a Vercel Function)
 - `prop-hunt` – root directory `client`, with env var `VITE_SERVER_URL` set to the server URL
+
+## Lobby, install and login
+
+- **Lobby:** everyone sees who is in and presses Ready. The round starts 3 seconds after all players (2–4) are ready; CPU players are always ready.
+- **Install (PWA):** open the game in Chrome/Edge/Safari and choose "Install" / "Add to Home Screen". It opens full screen like an app.
+- **Log in once:** your name and the password are saved on the device. "Log out" in the lobby forgets them.
