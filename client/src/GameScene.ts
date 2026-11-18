@@ -3,6 +3,7 @@ import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { addIconTextures } from "./icons.ts";
+import { placeAtmosphere } from "./atmosphere.ts";
 import { Lobby, type LobbyPlayer } from "./Lobby.ts";
 import { logOut } from "./gate.ts";
 import { Hud, type BoardRow } from "./Hud.ts";
@@ -215,7 +216,10 @@ export class GameScene extends Phaser.Scene {
     // Remove the old map.
     for (const img of this.lightImages) this.tweens.killTweensOf(img);
     this.lightImages = [];
-    for (const obj of this.worldObjects) obj.destroy();
+    for (const obj of this.worldObjects) {
+      this.tweens.killTweensOf(obj);
+      obj.destroy();
+    }
     this.worldObjects = [];
     this.clearChecks();
 
@@ -227,6 +231,7 @@ export class GameScene extends Phaser.Scene {
     placeProps(this, this.map);
     placeLights(this, this.map);
     placeFireflies(this, this.map);
+    placeAtmosphere(this, this.map);
     for (const obj of this.children.list) {
       if (!before.has(obj)) {
         this.worldObjects.push(obj);
