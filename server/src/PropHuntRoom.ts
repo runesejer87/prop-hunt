@@ -265,6 +265,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.timeLeft = 0;
     this.state.winner = "";
     this.state.round = 0;
+    // Send updates as often as the game steps, so movement on screen is even.
+    this.setPatchRate(1000 / TICK_RATE);
     // A slow tick must not make everyone jump: cap how much time one step covers.
     this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000), 1000 / TICK_RATE);
   }

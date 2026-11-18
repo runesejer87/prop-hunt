@@ -154,13 +154,13 @@ export class Nav {
   }
 
   /** Is the straight line between two points clear for a player to walk? */
-  lineClear(a: Point, b: Point, blocked?: (x: number, y: number) => boolean): boolean {
+  lineClear(a: Point, b: Point, blocked?: (x: number, y: number) => boolean, pad = 0): boolean {
     const d = Math.hypot(b.x - a.x, b.y - a.y);
     for (let t = 0; t <= d; t += 6) {
       const k = d === 0 ? 0 : t / d;
       const px = a.x + (b.x - a.x) * k;
       const py = a.y + (b.y - a.y) * k;
-      if (this.map.isBlocked(px, py, PLAYER_RADIUS - 1) || (blocked && blocked(px, py))) return false;
+      if (this.map.isBlocked(px, py, PLAYER_RADIUS - 1 + pad) || (blocked && blocked(px, py))) return false;
     }
     return true;
   }

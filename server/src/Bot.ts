@@ -213,7 +213,33 @@ export class BotBrain {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const l = Math.hypot(dx, dy) || 1;
-    this.input = { x: dx / l, y: dy / l };
+    const raw = { x: dx / l, y: dy / l };
+    // Turn gently instead of snapping to the new direction (no twitching at corners).
+    const cur = this.input;
+    if (Math.hypot(cur.x, cur.y) < 0.1) {
+      this.input = raw;
+      return;
+    }
+    const sx = cur.x * 0.65 + raw.x * 0.35;
+    const sy = cur.y * 0.65 + raw.y * 0.35;
+    const sl = Math.hypot(sx, sy);
+    this.input = sl < 0.2 ? raw : { x: sx / sl, y: sy / sl };
+  }
+
+  private lineMode = false;
+
+  /** Of the next few path points, the farthest one we can walk to in a straight line: smooth, no corner-hugging. */
+  private lookAhead(me: BodyState, solid: ((x: number, y: number) => boolean) | undefined): Point {
+    const last = this.path.length - 1;
+    while (this.pathIdx < last && Math.hypot(this.path[this.pathIdx]!.x - me.x, this.path[this.pathIdx]!.y - me.y) < 14) this.pathIdx++;
+    let best = this.path[this.pathIdx]!;
+    for (let j = Math.min(last, this.pathIdx + 10); j > this.pathIdx; j--) {
+      if (this.nav.lineClear(me, this.path[j]!, solid, 3)) {
+        best = this.path[j]!;
+        break;
+      }
+    }
+    return best;
   }
 
   /** If we have been trying to move but have not got anywhere, shake things up. */
@@ -258,12 +284,15 @@ export class BotBrain {
     const now = this.api.now();
     const d = Math.hypot(aim.x - me.x, aim.y - me.y);
     const solid = this.solidFn();
-    if (d < 110 && this.nav.lineClear(me, aim, solid)) {
+    // Straight line when it is short and clear (with a little slack so we do not flip between modes).
+    if (d < (this.lineMode ? 150 : 100) && this.nav.lineClear(me, aim, solid)) {
+      this.lineMode = true;
       this.setDir(me, aim);
       return false;
     }
+    this.lineMode = false;
     const aimMoved = Math.hypot(aim.x - this.pathAim.x, aim.y - this.pathAim.y) > 50;
-    if (this.path.length === 0 || now - this.pathAt > 0.7 || aimMoved) {
+    if (this.path.length === 0 || now - this.pathAt > 1.5 || aimMoved) {
       this.path = this.nav.path(me.x, me.y, arrived, 9000, solid) ?? [];
       this.pathIdx = 0;
       this.pathAt = now;
@@ -273,9 +302,7 @@ export class BotBrain {
       this.setDir(me, aim); // no path: just head that way
       return false;
     }
-    while (this.pathIdx < this.path.length - 1 && Math.hypot(this.path[this.pathIdx]!.x - me.x, this.path[this.pathIdx]!.y - me.y) < 12) this.pathIdx++;
-    const wp = this.path[Math.min(this.pathIdx + 2, this.path.length - 1)]!;
-    this.setDir(me, wp);
+    this.setDir(me, this.lookAhead(me, solid));
     return false;
   }
 
@@ -409,10 +436,9 @@ export class BotBrain {
 
   private followPath(me: BodyState) {
     if (this.path.length === 0) return this.stop();
-    while (this.pathIdx < this.path.length - 1 && Math.hypot(this.path[this.pathIdx]!.x - me.x, this.path[this.pathIdx]!.y - me.y) < 12) this.pathIdx++;
-    const wp = this.path[Math.min(this.pathIdx + 2, this.path.length - 1)]!;
-    if (Math.hypot(wp.x - me.x, wp.y - me.y) < 8 && this.pathIdx >= this.path.length - 1) return this.stop();
-    this.setDir(me, wp);
+    const last = this.path[this.path.length - 1]!;
+    if (this.pathIdx >= this.path.length - 1 && Math.hypot(last.x - me.x, last.y - me.y) < 10) return this.stop();
+    this.setDir(me, this.lookAhead(me, this.solidFn()));
   }
 
   /** An object to copy: close by, and of a kind that appears in several places so it blends in. */
