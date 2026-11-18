@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 
 /** What the on-screen buttons can do. The scene supplies these. */
 export interface TouchActions {
@@ -71,13 +72,13 @@ export class TouchControls {
       const color = colors[key];
       const circle = scene.add.circle(0, 0, 40, color, 0.28).setStrokeStyle(3, color, 0.85).setScrollFactor(0).setDepth(d).setVisible(false);
       const text = scene.add
-        .text(0, 0, "", { fontFamily: "sans-serif", fontSize: "20px", fontStyle: "bold", color: "#ffffff", align: "center" })
+        .text(0, 0, "", { fontFamily: FONT_DISPLAY, fontSize: "20px", fontStyle: "600", color: "#ffffff", align: "center" })
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(d + 1)
         .setVisible(false);
       const sub = scene.add
-        .text(0, 0, "", { fontFamily: "sans-serif", fontSize: "11px", color: "#e5e7eb", align: "center" })
+        .text(0, 0, "", { fontFamily: FONT_BODY, fontSize: "11px", color: "#e5e7eb", align: "center" })
         .setOrigin(0.5, 0)
         .setScrollFactor(0)
         .setDepth(d + 1)

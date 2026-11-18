@@ -1,8 +1,13 @@
+import "@fontsource-variable/fredoka";
+import "@fontsource-variable/nunito";
+import "./ui.css";
 import Phaser from "phaser";
+import { loadFonts } from "./theme.ts";
 import { joinGame } from "./gate.ts";
 import { GameScene } from "./GameScene.ts";
 
 // Join first (this shows the password screen if the server needs one), then start the game.
+await loadFonts();
 const room = await joinGame();
 
 const game = new Phaser.Game({

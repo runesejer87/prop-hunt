@@ -1,7 +1,6 @@
 import Phaser from "phaser";
-import { HUNTER_MAX_HP, MIN_PLAYERS } from "@prop-hunt/shared";
-
-const FONT = "sans-serif";
+import { HUNTER_MAX_HP } from "@prop-hunt/shared";
+import { COLOR, CSS, FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 
 export interface BoardRow {
   name: string;
@@ -11,84 +10,90 @@ export interface BoardRow {
   me: boolean;
 }
 
+/** Draws a soft dark rounded panel with a thin light edge. */
+function panel(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, r = 14, alpha = 0.78) {
+  g.fillStyle(0x000000, 0.28).fillRoundedRect(x, y + 3, w, h, r); // shadow
+  g.fillStyle(COLOR.panel, alpha).fillRoundedRect(x, y, w, h, r);
+  g.lineStyle(1.5, COLOR.panelEdge, 0.14).strokeRoundedRect(x, y, w, h, r);
+}
+
 /** Text and bars that sit on top of the game. */
 export class Hud {
+  private d = 100;
+  private top: Phaser.GameObjects.Graphics;
   private title: Phaser.GameObjects.Text;
   private sub: Phaser.GameObjects.Text;
+  private timer: Phaser.GameObjects.Graphics;
+  private hintBg: Phaser.GameObjects.Graphics;
   private hint: Phaser.GameObjects.Text;
   private banner: Phaser.GameObjects.Text;
-  private hpBack: Phaser.GameObjects.Rectangle;
-  private hpFill: Phaser.GameObjects.Rectangle;
+  private hpGfx: Phaser.GameObjects.Graphics;
   private hpLabel: Phaser.GameObjects.Text;
+  private pills: Phaser.GameObjects.Graphics;
   private prompt: Phaser.GameObjects.Text;
   private note: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text;
+  private toastBg: Phaser.GameObjects.Graphics;
   private abilityText: Phaser.GameObjects.Text;
   private warning: Phaser.GameObjects.Text;
   private touchMode = false;
-  private lobbyBtns: { key: "add" | "addEasy" | "remove"; text: Phaser.GameObjects.Text; rect: Phaser.Geom.Rectangle }[] = [];
-  private timerBack: Phaser.GameObjects.Rectangle;
-  private timerFill: Phaser.GameObjects.Rectangle;
-  private boardBg: Phaser.GameObjects.Rectangle;
+  private boardGfx: Phaser.GameObjects.Graphics;
   private boardTitle: Phaser.GameObjects.Text;
-  private boardRows: Phaser.GameObjects.Text[];
+  private boardRows: { rank: Phaser.GameObjects.Text; name: Phaser.GameObjects.Text; score: Phaser.GameObjects.Text }[];
 
   constructor(private scene: Phaser.Scene) {
-    const d = 100;
-    const text = (size: number, color = "#ffffff") =>
-      scene.add.text(0, 0, "", { fontFamily: FONT, fontSize: `${size}px`, color, align: "center", stroke: "#000000", strokeThickness: 4 }).setScrollFactor(0).setDepth(d);
-    this.title = text(22).setOrigin(0.5, 0).setBackgroundColor("#00000070").setPadding(14, 4, 14, 4);
-    this.sub = text(16, "#d0d4dc").setOrigin(0.5, 0).setBackgroundColor("#00000060").setPadding(10, 2, 10, 2);
-    this.hint = text(14, "#c0c4cc").setOrigin(0, 1);
-    this.banner = text(56).setOrigin(0.5).setVisible(false);
-    this.hpBack = scene.add.rectangle(0, 0, 200, 14, 0x000000, 0.6).setOrigin(1, 0).setScrollFactor(0).setDepth(d).setVisible(false);
-    this.hpFill = scene.add.rectangle(0, 0, 200, 14, 0xef4444).setOrigin(1, 0).setScrollFactor(0).setDepth(d + 1).setVisible(false);
-    this.hpLabel = text(13).setOrigin(1, 0).setVisible(false);
-    this.timerBack = scene.add.rectangle(0, 0, 320, 6, 0x000000, 0.55).setScrollFactor(0).setDepth(d).setVisible(false);
-    this.timerFill = scene.add.rectangle(0, 0, 320, 6, 0x4ade80).setOrigin(0, 0.5).setScrollFactor(0).setDepth(d + 1).setVisible(false);
-    this.boardBg = scene.add.rectangle(0, 0, 440, 200, 0x000000, 0.72).setScrollFactor(0).setDepth(d + 2).setVisible(false);
-    this.boardTitle = text(22).setOrigin(0.5, 0).setDepth(d + 3).setVisible(false);
-    this.boardRows = [0, 1, 2, 3].map(() =>
+    const d = this.d;
+    const gfx = (depth: number) => scene.add.graphics().setScrollFactor(0).setDepth(depth);
+    const text = (size: number, color: string = CSS.text, display = false, depth = d + 1) =>
       scene.add
-        .text(0, 0, "", { fontFamily: "monospace", fontSize: "18px", color: "#ffffff" })
-        .setOrigin(0, 0)
+        .text(0, 0, "", {
+          fontFamily: display ? FONT_DISPLAY : FONT_BODY,
+          fontSize: `${size}px`,
+          fontStyle: display ? "600" : "700",
+          color,
+          align: "center",
+        })
         .setScrollFactor(0)
-        .setDepth(d + 3)
-        .setVisible(false),
-    );
-    this.abilityText = scene.add
-      .text(0, 0, "", { fontFamily: FONT, fontSize: "18px", fontStyle: "bold", color: "#ffffff", backgroundColor: "#000000a0", padding: { x: 12, y: 8 } })
-      .setOrigin(1, 1)
-      .setScrollFactor(0)
-      .setDepth(d)
-      .setVisible(false);
-    const mk = (key: "add" | "addEasy" | "remove", label: string, color: string) => {
-      const t = scene.add
-        .text(0, 0, label, { fontFamily: FONT, fontSize: "16px", fontStyle: "bold", color: "#ffffff", backgroundColor: color })
-        .setPadding(12, 7, 12, 7)
-        .setOrigin(0.5, 0)
-        .setScrollFactor(0)
-        .setDepth(d + 4)
-        .setVisible(false);
-      this.lobbyBtns.push({ key, text: t, rect: new Phaser.Geom.Rectangle(0, 0, 0, 0) });
-    };
-    mk("add", "+ CPU player", "#2f7d4f");
-    mk("addEasy", "+ Easy CPU", "#3a6ea5");
-    mk("remove", "− Remove CPU", "#8a3a3a");
-    this.warning = text(24, "#ff6b6b").setOrigin(0.5, 0).setVisible(false);
-    this.toastText = text(16).setOrigin(0, 0).setVisible(false);
-    this.note = text(16).setOrigin(0.5, 1).setVisible(false);
-    this.prompt = scene.add
-      .text(0, 0, "", { fontFamily: FONT, fontSize: "18px", color: "#fff", backgroundColor: "#000000a0", padding: { x: 10, y: 6 } })
-      .setOrigin(0.5, 1)
-      .setScrollFactor(0)
-      .setDepth(d)
-      .setVisible(false);
+        .setDepth(depth);
+
+    this.top = gfx(d);
+    this.timer = gfx(d + 1);
+    this.title = text(26, CSS.text, true).setOrigin(0.5, 0).setShadow(0, 2, "#000000aa", 4, false, true);
+    this.sub = text(15, CSS.dim).setOrigin(0.5, 0);
+    this.hintBg = gfx(d);
+    this.hint = text(13, CSS.dim).setOrigin(0, 1).setFontStyle("600");
+    this.banner = text(68, CSS.green, true, d + 5).setOrigin(0.5).setVisible(false).setStroke("#0b0d12", 10).setShadow(0, 6, "#000000aa", 8, true, true).setLineSpacing(-6);
+    this.hpGfx = gfx(d + 1);
+    this.hpLabel = text(14, CSS.text, true).setOrigin(1, 0.5).setVisible(false);
+    this.pills = gfx(d);
+    this.boardGfx = gfx(d + 2);
+    this.boardTitle = text(24, CSS.text, true, d + 3).setOrigin(0.5, 0).setVisible(false);
+    this.boardRows = [0, 1, 2, 3].map(() => ({
+      rank: text(20, CSS.dim, true, d + 3).setOrigin(0, 0.5).setVisible(false),
+      name: text(19, CSS.text, false, d + 3).setOrigin(0, 0.5).setVisible(false),
+      score: text(20, CSS.text, true, d + 3).setOrigin(1, 0.5).setVisible(false),
+    }));
+    this.abilityText = text(18, CSS.text, true).setOrigin(1, 1).setVisible(false);
+    this.warning = text(26, CSS.red, true).setOrigin(0.5, 0).setVisible(false).setStroke("#0b0d12", 6);
+    this.toastBg = gfx(d + 6);
+    this.toastText = text(16, CSS.text, false, d + 7).setOrigin(0, 0).setVisible(false);
+    this.note = text(15, CSS.text).setOrigin(0.5, 1).setVisible(false).setStroke("#0b0d12", 4);
+    this.prompt = text(18, CSS.text, true).setOrigin(0.5, 1).setVisible(false);
+  }
+
+  /** A pill-shaped label behind a text (used for the prompt and ability). */
+  private pill(t: Phaser.GameObjects.Text, accent = false) {
+    if (!t.visible) return;
+    const b = t.getBounds();
+    const padX = 14;
+    const padY = 7;
+    panel(this.pills, b.x - padX, b.y - padY, b.width + padX * 2, b.height + padY * 2, (b.height + padY * 2) / 2, 0.82);
+    if (accent) this.pills.lineStyle(2, COLOR.green, 0.55).strokeRoundedRect(b.x - padX, b.y - padY, b.width + padX * 2, b.height + padY * 2, (b.height + padY * 2) / 2);
   }
 
   setPrompt(text: string | null) {
     const { width, height } = this.scene.scale;
-    if (text) this.prompt.setText(text).setPosition(width / 2, height - 44).setVisible(true);
+    if (text) this.prompt.setText(text).setPosition(width / 2, height - (this.touchMode ? 30 : 46)).setVisible(true);
     else this.prompt.setVisible(false);
   }
 
@@ -96,23 +101,32 @@ export class Hud {
   setBoard(visible: boolean, rows: BoardRow[], round: number, belowBanner: boolean) {
     const { width, height } = this.scene.scale;
     const shown = visible && rows.length > 0;
-    this.boardBg.setVisible(shown);
+    this.boardGfx.clear();
     this.boardTitle.setVisible(shown);
-    this.boardRows.forEach((r) => r.setVisible(false));
+    this.boardRows.forEach((r) => {
+      r.rank.setVisible(false);
+      r.name.setVisible(false);
+      r.score.setVisible(false);
+    });
     if (!shown) return;
-    const top = belowBanner ? height / 2 + 50 : height / 2 - 110;
-    const h = 56 + rows.length * 28;
-    this.boardBg.setPosition(width / 2, top + h / 2 - 8).setSize(440, h);
-    this.boardTitle.setText(round > 0 ? `Scores · round ${round}` : "Scores").setPosition(width / 2, top);
+    const w = Math.min(width - 24, 400);
+    const rowH = 38;
+    const h = 62 + rows.length * rowH;
+    const x = width / 2 - w / 2;
+    const y = Math.max(8, belowBanner ? height / 2 + 6 : height / 2 - h / 2);
+    panel(this.boardGfx, x, y, w, h, 18, 0.9);
+    this.boardTitle.setText(round > 0 ? `Scores · round ${round}` : "Scores").setPosition(width / 2, y + 12);
+    const medal = [0xfacc15, 0xcbd5e1, 0xd08a4e, 0x64748b];
     rows.slice(0, 4).forEach((row, i) => {
-      const gain = row.gain > 0 ? ` +${row.gain}` : "";
-      const tag = row.role === "hunter" ? " (hunter)" : "";
-      const label = `${i + 1}. ${row.name}${tag}`;
-      this.boardRows[i]!
-        .setText(`${label.padEnd(26)}${String(row.score).padStart(3)}${gain}`)
-        .setColor(row.me ? "#ffe27a" : "#ffffff")
-        .setPosition(width / 2 - 200, top + 36 + i * 28)
-        .setVisible(true);
+      const cy = y + 62 + i * rowH + rowH / 2 - 2;
+      if (row.me) this.boardGfx.fillStyle(COLOR.yellow, 0.14).fillRoundedRect(x + 8, cy - rowH / 2 + 2, w - 16, rowH - 4, 10);
+      this.boardGfx.fillStyle(medal[i] ?? 0x64748b, 1).fillCircle(x + 30, cy, 4);
+      const r = this.boardRows[i]!;
+      const tag = row.role === "hunter" ? "  🔍" : "";
+      r.rank.setText(`${i + 1}`).setPosition(x + 42, cy).setVisible(true);
+      r.name.setText(`${row.name}${tag}`).setColor(row.me ? CSS.yellow : CSS.text).setPosition(x + 70, cy).setVisible(true);
+      r.name.setCrop(0, 0, w - 160, 40);
+      r.score.setText(`${row.score}${row.gain > 0 ? `  +${row.gain}` : ""}`).setColor(row.gain > 0 ? CSS.green : row.me ? CSS.yellow : CSS.text).setPosition(x + w - 20, cy).setVisible(true);
     });
   }
 
@@ -121,25 +135,9 @@ export class Hud {
     this.touchMode = on;
   }
 
-  /** Lobby buttons for adding and removing computer players. */
-  setLobbyButtons(visible: boolean, canAdd: boolean, canRemove: boolean) {
-    const { width } = this.scene.scale;
-    const y = (this.sub.visible ? this.sub.y + this.sub.height : this.title.y + this.title.height) + 16;
-    const shown = this.lobbyBtns.filter((b) => visible && (b.key === "remove" ? canRemove : canAdd));
-    this.lobbyBtns.forEach((b) => b.text.setVisible(false));
-    const gap = 10;
-    const total = shown.reduce((n, b) => n + b.text.width, 0) + gap * Math.max(0, shown.length - 1);
-    let x = width / 2 - total / 2;
-    for (const b of shown) {
-      b.text.setPosition(x + b.text.width / 2, y).setVisible(true);
-      b.rect.setTo(x, y, b.text.width, b.text.height);
-      x += b.text.width + gap;
-    }
-  }
-
-  /** Which lobby button, if any, is at this screen position. */
-  lobbyButtonAt(x: number, y: number): "add" | "addEasy" | "remove" | null {
-    for (const b of this.lobbyBtns) if (b.text.visible && b.rect.contains(x, y)) return b.key;
+  /** (The lobby now lives in Lobby.ts.) */
+  setLobbyButtons(_visible: boolean, _canAdd: boolean, _canRemove: boolean) {}
+  lobbyButtonAt(_x: number, _y: number): null {
     return null;
   }
 
@@ -150,7 +148,7 @@ export class Hud {
       this.warning.setVisible(false);
       return;
     }
-    this.warning.setWordWrapWidth(Math.max(160, width - 24)).setPosition(width / 2, 100).setText(text).setVisible(true).setAlpha(0.55 + 0.45 * Math.abs(Math.sin(time / 180)));
+    this.warning.setWordWrapWidth(Math.max(160, width - 24)).setPosition(width / 2, this.top.y + 118).setText(text).setVisible(true).setAlpha(0.6 + 0.4 * Math.abs(Math.sin(time / 180)));
   }
 
   /** The ability button in the bottom right: its name, and when it is ready. */
@@ -163,23 +161,29 @@ export class Hud {
     const ready = cooldown <= 0;
     this.abilityText
       .setText(ready ? `F · ${label}` : `F · ${label}  ${cooldown}s`)
-      .setColor(ready ? "#9dffa8" : "#9aa0ac")
-      .setPosition(width - 14, height - 14)
+      .setColor(ready ? CSS.green : CSS.dim)
+      .setPosition(width - 26, height - 20)
       .setVisible(true);
   }
 
   /** A short message in the top left corner. */
   toast(message: string) {
     const { height } = this.scene.scale;
-    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 24)).setPosition(12, this.touchMode ? height - 70 : 12).setAlpha(1).setVisible(true);
+    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 48)).setPosition(26, (this.touchMode ? height - 78 : 24) + 0).setAlpha(1).setVisible(true);
+    this.toastBg.clear().setAlpha(1);
+    const b = this.toastText.getBounds();
+    panel(this.toastBg, b.x - 14, b.y - 8, b.width + 28, b.height + 16, 14, 0.85);
     this.scene.tweens.killTweensOf(this.toastText);
-    this.scene.tweens.add({ targets: this.toastText, alpha: 0, delay: 1200, duration: 400, onComplete: () => this.toastText.setVisible(false) });
+    this.scene.tweens.killTweensOf(this.toastBg);
+    const fade = { delay: 1500, duration: 400 };
+    this.scene.tweens.add({ targets: this.toastText, alpha: 0, ...fade, onComplete: () => this.toastText.setVisible(false) });
+    this.scene.tweens.add({ targets: this.toastBg, alpha: 0, ...fade, onComplete: () => this.toastBg.clear() });
   }
 
   /** Small status line above the prompt, e.g. whether you are a perfect copy yet. */
   setNote(text: string | null, color = "#ffffff") {
     const { width, height } = this.scene.scale;
-    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - 84).setVisible(true);
+    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - (this.touchMode ? 70 : 88)).setVisible(true);
     else this.note.setVisible(false);
   }
 
@@ -200,17 +204,16 @@ export class Hud {
     fraction?: number;
   }) {
     const { width, height } = this.scene.scale;
-    const wrap = Math.max(160, Math.min(width - 24, 760));
+    const wrap = Math.max(160, Math.min(width - 48, 700));
     this.title.setWordWrapWidth(wrap);
     this.sub.setWordWrapWidth(wrap);
-    this.title.setPosition(width / 2, 12);
-    this.sub.setPosition(width / 2, 12 + this.title.height + 4);
-    this.hint.setPosition(12, height - 12);
-    this.banner.setPosition(width / 2, height / 2);
+    this.banner.setPosition(width / 2, Math.max(110, height * 0.34));
+    this.top.y = 0;
 
     if (!info.connected) {
-      this.title.setText("Connecting…");
-      this.sub.setText("");
+      this.title.setText("Connecting…").setVisible(true).setPosition(width / 2, 22);
+      this.sub.setText("").setVisible(false);
+      this.drawTop(width, 22, 0, -1);
       return;
     }
 
@@ -225,16 +228,23 @@ export class Hud {
         // The lobby card (Lobby.ts) shows everything now.
         break;
       case "hide":
-        title = isHunter ? `You are the HUNTER — the props are hiding… ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
-        sub = info.role === "spectator" ? "Spectating until the next round" : isHunter ? "You can't see or move yet" : this.touchMode ? "Walk to a small object and tap Become" : "Walk to a small object and press E to become it";
-        hint = isHunter ? "Click or Space: swing at the mouse   M: sound" : "WASD / arrows: move   E: become a nearby object   Q: change back   R: turn   (hold still to blend in)   M: sound";
+        title = isHunter ? `You are the HUNTER · ${info.timeLeft}` : `HIDE! ${info.timeLeft}`;
+        sub =
+          info.role === "spectator"
+            ? "Spectating until the next round"
+            : isHunter
+              ? "The props are hiding. You can't see or move yet."
+              : this.touchMode
+                ? "Walk to a small object and tap Become"
+                : "Walk to a small object and press E to become it";
+        hint = isHunter ? "Space: swing   M: sound" : "WASD: move   E: become   Q: change back   R: turn   Hold still to blend in   M: sound";
         break;
       case "hunt":
         title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
-        sub = `Round ${info.round ?? 0} · ${info.mapName ?? ""}   ·   ${mmss}   ·   Props left: ${info.propsLeft}${info.alert ? `   ·   Alert ${info.alert}` : ""}`;
+        sub = `${mmss}  ·  ${info.propsLeft} prop${info.propsLeft === 1 ? "" : "s"} left  ·  ${info.mapName ?? ""}${info.alert ? `  ·  Alert ${info.alert}` : ""}`;
         hint = isHunter
-          ? "WASD: steer   Space: swing at what's in front   Hold E: inspect (safe)   F: radar   Tab: scores"
-          : "Don't run! Hide: E / Q / R, then hold still.   F: fake noise   Space: taunt (silly, but it gives you away)   Tab: scores";
+          ? "WASD: steer   Space: swing   Hold E: inspect (safe)   F: radar   Tab: scores"
+          : "Don't run! E / Q / R, then hold still   F: fake noise   Space: taunt (gives you away!)   Tab: scores";
         break;
       case "end":
         title = "Round over";
@@ -243,27 +253,41 @@ export class Hud {
     }
     this.title.setText(title).setVisible(title !== "");
     this.sub.setText(sub).setVisible(sub !== "");
-    this.hint.setText(this.touchMode ? "" : hint);
+    this.title.setPosition(width / 2, 14);
+    this.sub.setPosition(width / 2, 14 + this.title.height + 0);
+    this.hint.setText(this.touchMode ? "" : hint).setPosition(26, height - 16);
 
-    // Time bar under the title: green, then yellow, then red as time runs out.
+    // Top panel and the time bar inside it.
     const f = info.fraction ?? -1;
     const showBar = f >= 0 && (info.phase === "hide" || info.phase === "hunt");
-    const barY = this.sub.y + (this.sub.visible ? this.sub.height : 0) + 10;
-    this.timerBack.setVisible(showBar).setPosition(width / 2, barY);
-    this.timerFill
-      .setVisible(showBar)
-      .setPosition(width / 2 - 160, barY)
-      .setSize(Math.max(1, 320 * Math.min(1, f)), 6)
-      .setFillStyle(f > 0.4 ? 0x4ade80 : f > 0.15 ? 0xfacc15 : 0xef4444);
+    this.drawTop(width, title ? 14 + this.title.height + (sub ? this.sub.height : 0) + 12 : 0, showBar ? f : -1, info.phase === "hide" ? 0 : 1);
 
-    // Hunter health
+    // Hint strip
+    this.hintBg.clear();
+    if (this.hint.text) {
+      const b = this.hint.getBounds();
+      panel(this.hintBg, b.x - 12, b.y - 7, b.width + 24, b.height + 14, 12, 0.6);
+    }
+
+    // Hunter health: a heart and a rounded bar, top right.
     const showHp = isHunter && (info.phase === "hide" || info.phase === "hunt");
-    const narrow = width < 700;
-    const hx = narrow ? width / 2 + 100 : width - 12;
-    const hy = narrow ? barY + 12 : 12;
-    this.hpBack.setVisible(showHp).setPosition(hx, hy);
-    this.hpFill.setVisible(showHp).setPosition(hx, hy).setSize(Math.max(1, (200 * info.hp) / HUNTER_MAX_HP), 14);
-    this.hpLabel.setVisible(showHp).setPosition(hx, hy + 18).setText(`Health ${info.hp}`);
+    this.hpGfx.clear();
+    this.hpLabel.setVisible(showHp);
+    if (showHp) {
+      const w = 150;
+      const bx = width - 26 - w;
+      const by = 22;
+      panel(this.hpGfx, bx - 44, by - 14, w + 62, 42, 21, 0.82);
+      this.hpGfx.fillStyle(0x000000, 0.5).fillRoundedRect(bx, by, w, 14, 7);
+      const k = Math.max(0, Math.min(1, info.hp / HUNTER_MAX_HP));
+      if (k > 0) this.hpGfx.fillStyle(k > 0.5 ? COLOR.green : k > 0.25 ? COLOR.yellow : COLOR.red, 1).fillRoundedRect(bx, by, Math.max(14, w * k), 14, 7);
+      this.hpLabel.setText("♥").setColor(CSS.red).setFontSize("22px").setOrigin(0.5).setPosition(bx - 22, by + 7);
+    }
+
+    // Floating pills behind the prompt / ability
+    this.pills.clear();
+    this.pill(this.prompt, true);
+    this.pill(this.abilityText);
 
     // Result banner
     if (info.phase === "end" && info.winner) {
@@ -272,9 +296,32 @@ export class Hud {
       if (info.role === "hunter") youWon = !propsWon;
       else if (info.role === "prop") youWon = propsWon;
       const who = propsWon ? "PROPS WIN" : "HUNTER WINS";
-      this.banner.setText(youWon === null ? who : youWon ? `${who}\nYou win!` : `${who}\nYou lose`).setColor(youWon === false ? "#ff8a8a" : "#9dffa8").setVisible(true);
+      this.banner
+        .setText(youWon === null ? who : `${who}\n${youWon ? "You win!" : "You lose"}`)
+        .setFontSize(width < 600 ? "44px" : "68px")
+        .setColor(youWon === false ? CSS.red : CSS.green)
+        .setVisible(true);
     } else {
       this.banner.setVisible(false);
+    }
+  }
+
+  /** The panel at the top centre with the title, the sub line and the time bar. */
+  private drawTop(width: number, contentH: number, fraction: number, _phase: number) {
+    this.top.clear();
+    this.timer.clear();
+    if (contentH <= 0) return;
+    const w = Math.min(width - 24, Math.max(this.title.width, this.sub.width) + 56);
+    const barH = fraction >= 0 ? 10 : 0;
+    const h = contentH + barH;
+    const x = width / 2 - w / 2;
+    panel(this.top, x, 6, w, h, 18, 0.8);
+    if (fraction >= 0) {
+      const bw = w - 36;
+      const by = 6 + h - 16;
+      this.timer.fillStyle(0x000000, 0.5).fillRoundedRect(x + 18, by, bw, 6, 3);
+      const col = fraction > 0.4 ? COLOR.green : fraction > 0.15 ? COLOR.yellow : COLOR.red;
+      this.timer.fillStyle(col, 1).fillRoundedRect(x + 18, by, Math.max(6, bw * Math.min(1, fraction)), 6, 3);
     }
   }
 }

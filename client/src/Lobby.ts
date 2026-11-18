@@ -15,7 +15,7 @@ export interface LobbyActions {
   logOut(): void;
 }
 
-const COLORS = ["#4ade80", "#60a5fa", "#f59e0b", "#f472b6"];
+const COLORS = ["#4ade80", "#60a5fa", "#fbbf24", "#f472b6"];
 
 /** The lobby screen: who is here, who is ready, and a Ready button. A plain HTML card over the game. */
 export class Lobby {
@@ -32,28 +32,19 @@ export class Lobby {
   constructor(private actions: LobbyActions) {
     const el = document.createElement("div");
     el.id = "lobby";
-    el.style.cssText =
-      "position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:5;font-family:sans-serif;color:#fff;" +
-      "background:rgba(10,12,16,.55);padding:12px;box-sizing:border-box;overflow:auto;touch-action:auto;";
-    const btn = "padding:11px 14px;font-size:15px;font-weight:700;border-radius:10px;border:0;cursor:pointer;";
+    el.className = "ph-lobby";
     el.innerHTML = `
-      <div style="width:min(420px,94vw);background:#181b22;border:1px solid #2f3440;border-radius:16px;padding:18px;box-shadow:0 10px 40px #000a;display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline">
-          <div style="font-size:26px;font-weight:800">Lobby</div>
-          <div id="lb-count" style="color:#8b92a0;font-size:14px"></div>
+      <div class="ph-card">
+        <div class="ph-head"><h2>Lobby</h2><div id="lb-count" class="ph-count"></div></div>
+        <div id="lb-list" class="ph-list"></div>
+        <div id="lb-status" class="ph-status"></div>
+        <button id="lb-ready" class="ph-btn">Ready</button>
+        <div class="ph-actions">
+          <button id="lb-add" class="ph-btn ph-small">+ CPU player</button>
+          <button id="lb-easy" class="ph-btn ph-small">+ Easy CPU</button>
+          <button id="lb-remove" class="ph-btn ph-small ph-danger" style="flex:none">− CPU</button>
         </div>
-        <div id="lb-list" style="display:flex;flex-direction:column;gap:8px"></div>
-        <div id="lb-status" style="min-height:20px;text-align:center;color:#c0c4cc;font-size:14px"></div>
-        <button id="lb-ready" style="${btn}font-size:18px;padding:14px;background:#4ade80;color:#10261a">Ready</button>
-        <div style="display:flex;gap:8px">
-          <button id="lb-add" style="${btn}flex:1;background:#2a2f3c;color:#e5e7eb">+ CPU player</button>
-          <button id="lb-easy" style="${btn}flex:1;background:#2a2f3c;color:#e5e7eb">+ Easy CPU</button>
-          <button id="lb-remove" style="${btn}background:#3a2a2a;color:#fca5a5">− CPU</button>
-        </div>
-        <div style="display:flex;justify-content:space-between;color:#7d8492;font-size:12px">
-          <span>Share the link with friends (2–4 players)</span>
-          <a id="lb-out" href="#" style="color:#7d8492">Log out</a>
-        </div>
+        <div class="ph-foot"><span>Share the link with friends</span><a id="lb-out" href="#">Log out</a></div>
       </div>`;
     document.body.appendChild(el);
     this.el = el;
@@ -86,24 +77,31 @@ export class Lobby {
     this.list.innerHTML = "";
     players.forEach((p, i) => {
       const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:#20242d";
-      const dot = document.createElement("span");
-      dot.style.cssText = `width:14px;height:14px;border-radius:50%;background:${COLORS[i % COLORS.length]};flex:none`;
+      row.className = `ph-row${p.ready ? " ph-ready" : ""}${p.me ? " ph-me" : ""}`;
+      const av = document.createElement("span");
+      av.className = "ph-avatar";
+      av.style.background = COLORS[i % COLORS.length]!;
+      av.textContent = p.bot ? "🤖" : (p.name.trim()[0] ?? "?").toUpperCase();
       const name = document.createElement("span");
-      name.style.cssText = "flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-      name.textContent = p.name + (p.me ? " (you)" : "");
+      name.className = "ph-name";
+      name.textContent = p.name;
+      if (p.me) {
+        const you = document.createElement("small");
+        you.textContent = "you";
+        name.appendChild(you);
+      }
       const score = document.createElement("span");
-      score.style.cssText = "color:#8b92a0;font-size:13px";
+      score.className = "ph-pts";
       score.textContent = p.score ? `${p.score} pts` : "";
       const badge = document.createElement("span");
-      badge.style.cssText = `font-size:13px;font-weight:700;padding:3px 9px;border-radius:99px;${p.ready ? "background:#14532d;color:#86efac" : "background:#2f3440;color:#9aa1ae"}`;
+      badge.className = "ph-badge";
       badge.textContent = p.ready ? "Ready" : "Not ready";
-      row.append(dot, name, score, badge);
+      row.append(av, name, score, badge);
       this.list.appendChild(row);
     });
     for (let i = players.length; i < MAX_PLAYERS; i++) {
       const row = document.createElement("div");
-      row.style.cssText = "padding:10px 12px;border-radius:10px;border:1px dashed #323846;color:#5d6472;font-size:14px";
+      row.className = "ph-empty";
       row.textContent = "Waiting for a player…";
       this.list.appendChild(row);
     }
@@ -111,12 +109,11 @@ export class Lobby {
 
     const everyoneReady = players.length >= MIN_PLAYERS && players.every((p) => p.ready);
     if (players.length < MIN_PLAYERS) this.status.textContent = "Need at least 2 players. Invite a friend or add a CPU.";
-    else if (everyoneReady) this.status.textContent = `Starting in ${countdown}…`;
+    else if (everyoneReady) this.status.innerHTML = `Starting in <b>${countdown}</b>`;
     else this.status.textContent = `Waiting for ${players.filter((p) => !p.ready).map((p) => p.name).join(", ")}`;
 
     this.readyBtn.textContent = this.myReady ? "Not ready" : "Ready";
-    this.readyBtn.style.background = this.myReady ? "#2f3440" : "#4ade80";
-    this.readyBtn.style.color = this.myReady ? "#e5e7eb" : "#10261a";
+    this.readyBtn.classList.toggle("ph-off", this.myReady);
     const hasBot = players.some((p) => p.bot);
     const full = players.length >= MAX_PLAYERS;
     this.addBtn.style.display = this.easyBtn.style.display = full ? "none" : "";

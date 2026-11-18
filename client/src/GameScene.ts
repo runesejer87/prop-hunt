@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
 import { Lobby, type LobbyPlayer } from "./Lobby.ts";
@@ -318,7 +319,7 @@ export class GameScene extends Phaser.Scene {
   private showInspectResult(r: InspectResult) {
     const say = (text: string, color: string) => {
       const label = this.add
-        .text(r.x, r.y - 22, text, { fontFamily: "sans-serif", fontSize: "16px", color, stroke: "#000", strokeThickness: 3 })
+        .text(r.x, r.y - 22, text, { fontFamily: FONT_DISPLAY, fontSize: "18px", fontStyle: "600", color, stroke: "#0b0d12", strokeThickness: 4 })
         .setOrigin(0.5)
         .setDepth(70);
       this.tweens.add({ targets: label, y: label.y - 26, alpha: 0, duration: 1300, onComplete: () => label.destroy() });
@@ -331,7 +332,7 @@ export class GameScene extends Phaser.Scene {
         if (prop) {
           // A tick stays on checked objects for the rest of the round.
           const tick = this.add
-            .text(prop.x, prop.y, "✓", { fontFamily: "sans-serif", fontSize: "20px", fontStyle: "bold", color: "#7cf5a0", stroke: "#000", strokeThickness: 3 })
+            .text(prop.x, prop.y, "✓", { fontFamily: FONT_BODY, fontSize: "20px", fontStyle: "bold", color: "#7cf5a0", stroke: "#000", strokeThickness: 3 })
             .setOrigin(0.5)
             .setDepth(6)
             .setAlpha(0.9);
@@ -389,7 +390,7 @@ export class GameScene extends Phaser.Scene {
     if (p.kind === "dust") {
       // Someone just changed shape near here.
       this.burst(p.x, p.y, 0xe8e4da, 10, 46, 1100, 4.5, 0.55);
-      const q = this.add.text(p.x, p.y - 8, "?", { fontFamily: "sans-serif", fontSize: "18px", color: "#fff", stroke: "#000", strokeThickness: 3 }).setOrigin(0.5).setDepth(55);
+      const q = this.add.text(p.x, p.y - 8, "?", { fontFamily: FONT_BODY, fontSize: "18px", color: "#fff", stroke: "#000", strokeThickness: 3 }).setOrigin(0.5).setDepth(55);
       this.tweens.add({ targets: q, y: q.y - 16, alpha: 0, duration: 1400, onComplete: () => q.destroy() });
       this.sfx.poof(0.35, this.audioFrom(p.x, p.y).pan);
       return;
@@ -468,9 +469,9 @@ export class GameScene extends Phaser.Scene {
     this.burst(e.x, e.y, colors[e.sound % 5]!, 14, 80, 900, 4.5, 0.7);
     const bubble = this.add
       .text(e.x, e.y - 26, words[e.sound % 5]!, {
-        fontFamily: "sans-serif",
-        fontSize: "17px",
-        fontStyle: "bold",
+        fontFamily: FONT_DISPLAY,
+        fontSize: "20px",
+        fontStyle: "600",
         color: "#ffffff",
         stroke: "#000000",
         strokeThickness: 4,
@@ -561,8 +562,9 @@ export class GameScene extends Phaser.Scene {
     if (e.result === "prop" && this.me?.role === "hunter") this.cameras.main.shake(130, 0.005);
     const label = this.add
       .text(e.x, e.y - 20, e.result === "player" ? "CAUGHT!" : e.result === "caught" ? "FOUND! Catch them!" : e.result === "escaped" ? "Escaped!" : "Just an object", {
-        fontFamily: "sans-serif",
-        fontSize: "16px",
+        fontFamily: FONT_DISPLAY,
+        fontSize: "19px",
+        fontStyle: "600",
         color: e.result === "player" ? "#9dffa8" : e.result === "caught" ? "#ffd166" : e.result === "escaped" ? "#cfd3dc" : "#ff8a8a",
         stroke: "#000",
         strokeThickness: 3,
@@ -591,7 +593,7 @@ export class GameScene extends Phaser.Scene {
       let tag = this.names.get(id);
       if (!tag) {
         tag = this.add
-          .text(0, 0, p.name, { fontFamily: "sans-serif", fontSize: "12px", color: "#ffffff", stroke: "#000000", strokeThickness: 3 })
+          .text(0, 0, p.name, { fontFamily: FONT_BODY, fontSize: "13px", fontStyle: "800", color: "#ffffff", stroke: "#0b0d12", strokeThickness: 4 })
           .setOrigin(0.5, 1)
           .setDepth(6);
         this.names.set(id, tag);

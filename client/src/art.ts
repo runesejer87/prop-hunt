@@ -5,6 +5,7 @@
  * with the same texture keys instead.
  */
 import Phaser from "phaser";
+import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 import {
   TILE,
   PROP_TYPES,
@@ -222,7 +223,7 @@ export function drawWorld(scene: Phaser.Scene, map: GameMap) {
   for (const room of rooms) {
     const [lx, ly] = map.def.labels[room.name] ?? [(room.x + room.w / 2) * TILE, (room.y + 1) * TILE];
     scene.add
-      .text(lx, ly, room.name.toUpperCase(), { fontFamily: "sans-serif", fontSize: "14px", fontStyle: "bold", color: "#ffffff" })
+      .text(lx, ly, room.name.toUpperCase(), { fontFamily: FONT_DISPLAY, fontSize: "14px", fontStyle: "600", color: "#ffffff" })
       .setOrigin(0.5)
       .setAlpha(0.3)
       .setDepth(0.9);
