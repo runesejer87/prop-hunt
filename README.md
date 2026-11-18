@@ -107,5 +107,5 @@ Two Vercel projects from this repo:
 ## More worlds, roles, phone fixes
 
 - **Maps:** House, Office, Diner, plus the cosy Playroom, Garden and Bakery. A new map is picked each round.
-- **Roles:** in the lobby each player picks Hunter or Hider. Exactly one hunter is needed to start (a CPU player hunts if no human picks it).
+- **Roles:** in the lobby each player can pick Auto (default), Hider or Hunter. Only one player can pick Hunter. If nobody picks, the hunter changes every round (never the same player twice in a row). Players who pick Hider are skipped.
 - **Phone:** the joystick stands still when only touched and reaches full speed about two thirds of the way to the edge, and stays at full speed beyond. The layout respects the notch / Dynamic Island and home bar.

@@ -136,6 +136,8 @@ export const PlayerState = schema(
     ready: t.boolean(),
     /** Lobby: this player asked to be the hunter. */
     wantHunter: t.boolean(),
+    /** Lobby: this player asked to hide (never be picked as the hunter automatically). */
+    wantHider: t.boolean(),
     /** Seconds left of the sprint a found prop gets before it is caught or escapes. 0 when not being chased. */
     chase: t.number(),
   },
@@ -270,7 +272,7 @@ export interface TauntEvent {
 
 /** Lobby: add or remove a computer-controlled player. */
 export const MSG_READY = "ready";
-/** Lobby: choose to be the hunter (`hunter: true`) or a hider. Only one player can be the hunter. */
+/** Lobby: choose a role: "hunter", "hider" or "auto" (the hunter changes every round). Only one player can pick hunter. */
 export const MSG_ROLE = "role";
 export const MSG_ADD_BOT = "addBot";
 export const MSG_REMOVE_BOT = "removeBot";

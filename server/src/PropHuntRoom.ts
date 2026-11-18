@@ -180,13 +180,14 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     [MSG_TAUNT]: (client: Client) => this.doTaunt(client.sessionId),
     [MSG_ADD_BOT]: (_client: Client, msg: AddBotMessage) => this.addBot(msg?.level === "easy" ? "easy" : "normal"),
     [MSG_REMOVE_BOT]: () => this.removeBot(),
-    [MSG_ROLE]: (client: Client, msg: { hunter?: boolean }) => {
+    [MSG_ROLE]: (client: Client, msg: { role?: string }) => {
       const p = this.state.players.get(client.sessionId);
       if (!p || this.state.phase !== "lobby") return;
-      const want = !!msg?.hunter;
+      const role = msg?.role;
       // Only one hunter: if someone else already took it, the answer is no.
-      if (want && this.players().some((o) => !o.bot && o.wantHunter && o.id !== p.id)) return;
-      p.wantHunter = want;
+      if (role === "hunter" && this.players().some((o) => !o.bot && o.wantHunter && o.id !== p.id)) return;
+      p.wantHunter = role === "hunter";
+      p.wantHider = role === "hider";
     },
     [MSG_READY]: (client: Client, msg: { ready?: boolean }) => {
       const p = this.state.players.get(client.sessionId);
@@ -274,6 +275,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.gain = 0;
     player.ready = false;
     player.wantHunter = false;
+    player.wantHider = false;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
@@ -343,6 +345,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.bot = true;
     player.ready = true;
     player.wantHunter = false;
+    player.wantHider = false;
     player.score = 0;
     player.gain = 0;
     player.hp = HUNTER_MAX_HP;
@@ -450,11 +453,25 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     return [...this.state.players.values()];
   }
 
-  /** Who will be the hunter if the round starts now (a player who asked for it, otherwise the first CPU player). */
+  /**
+   * Who hunts this round: the player who asked for it. If nobody did, it changes every round:
+   * whoever has hunted the fewest times (not counting players who asked to hide), ties picked at random.
+   */
   private lobbyHunter(): PlayerState | undefined {
     const all = this.players();
-    return all.find((p) => !p.bot && p.wantHunter) ?? all.find((p) => p.bot);
+    const asked = all.find((p) => !p.bot && p.wantHunter);
+    if (asked) return asked;
+    if (all.length === 0) return undefined;
+    const pool = all.filter((p) => !p.wantHider);
+    const from = pool.length > 0 ? pool : all;
+    const fewest = Math.min(...from.map((p) => this.hunts.get(p.id) ?? 0));
+    let tied = from.filter((p) => (this.hunts.get(p.id) ?? 0) === fewest);
+    // Never the same hunter twice in a row when someone else is just as due.
+    if (tied.length > 1) tied = tied.filter((p) => p.id !== this.lastHunter);
+    return tied[Math.floor(Math.random() * tied.length)];
   }
+
+  private lastHunter = "";
 
   private startRound() {
     const all = this.players();
@@ -462,6 +479,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const chosen = this.lobbyHunter() ?? all[0]!;
     const fewest = this.hunts.get(chosen.id) ?? 0;
     this.hunts.set(chosen.id, fewest + 1);
+    this.lastHunter = chosen.id;
     this.state.round += 1;
     this.chooseNextMap();
     all.forEach((p) => {
@@ -528,6 +546,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       p.alive = true;
       p.ready = p.bot;
       p.wantHunter = false;
+      p.wantHider = false;
       p.hp = HUNTER_MAX_HP;
       this.clearDisguise(p.id, body);
       this.placeRandomly(body);
@@ -542,7 +561,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const players = this.players();
 
     if (phase === "lobby") {
-      if (players.length >= MIN_PLAYERS && players.every((p) => p.ready) && this.lobbyHunter()) {
+      if (players.length >= MIN_PLAYERS && players.every((p) => p.ready)) {
         if (this.clockLeft <= 0) this.clockLeft = LOBBY_COUNTDOWN;
         this.clockLeft -= dt;
         this.state.timeLeft = Math.max(0, Math.ceil(this.clockLeft));

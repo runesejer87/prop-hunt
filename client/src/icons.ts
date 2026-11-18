@@ -33,6 +33,7 @@ import offlineSvg from "@phosphor-icons/core/assets/fill/wifi-slash-fill.svg?raw
 import plugSvg from "@phosphor-icons/core/assets/fill/plugs-connected-fill.svg?raw";
 import skullSvg from "@phosphor-icons/core/assets/fill/skull-fill.svg?raw";
 import binocularsSvg from "@phosphor-icons/core/assets/fill/binoculars-fill.svg?raw";
+import shuffleSvg from "@phosphor-icons/core/assets/fill/shuffle-fill.svg?raw";
 import timerSvg from "@phosphor-icons/core/assets/fill/timer-fill.svg?raw";
 
 const SVG = {
@@ -71,6 +72,7 @@ const SVG = {
   skull: skullSvg,
   binoculars: binocularsSvg,
   timer: timerSvg,
+  shuffle: shuffleSvg,
 } as const;
 
 export type IconName = keyof typeof SVG;
