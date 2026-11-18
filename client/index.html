@@ -17,9 +17,9 @@
     <style>
       html, body {
         margin: 0;
+        width: 100%;
         height: 100%;
-        height: 100dvh;
-        background: #111;
+        background: #1b1d23;
         overflow: hidden;
         overscroll-behavior: none;
         touch-action: none;
@@ -28,7 +28,8 @@
         -webkit-touch-callout: none;
         -webkit-tap-highlight-color: transparent;
       }
-      #game { width: 100%; height: 100%; height: 100dvh; touch-action: none; }
+      /* Fixed to the whole screen (also in the installed app, where 100vh can fall short at the bottom). */
+      #game { position: fixed; left: 0; top: 0; right: 0; bottom: 0; touch-action: none; }
       canvas { display: block; touch-action: none; }
       /* The name and password boxes must still be selectable and typeable. */
       input { -webkit-user-select: text; user-select: text; touch-action: auto; }

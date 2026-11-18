@@ -7,10 +7,13 @@ export interface LobbyPlayer {
   bot: boolean;
   me: boolean;
   score: number;
+  /** Asked to be the hunter. */
+  wantHunter: boolean;
 }
 
 export interface LobbyActions {
   ready(on: boolean): void;
+  role(hunter: boolean): void;
   addBot(level: "normal" | "easy"): void;
   removeBot(): void;
   logOut(): void;
@@ -27,6 +30,8 @@ export class Lobby {
   private addBtn: HTMLButtonElement;
   private easyBtn: HTMLButtonElement;
   private removeBtn: HTMLButtonElement;
+  private hiderBtn!: HTMLButtonElement;
+  private hunterBtn!: HTMLButtonElement;
   private lastKey = "";
   private myReady = false;
 
@@ -39,6 +44,11 @@ export class Lobby {
         <div class="ph-head"><h2>${icon("users", 26)} Lobby</h2><div id="lb-count" class="ph-count"></div></div>
         <div id="lb-list" class="ph-list"></div>
         <div id="lb-status" class="ph-status"></div>
+        <div class="ph-seg" role="group" aria-label="Your role">
+          <button id="lb-hider" class="ph-segbtn">${icon("ghost", 20)} Hider</button>
+          <button id="lb-hunter" class="ph-segbtn">${icon("search", 20)} Hunter</button>
+        </div>
+        <div id="lb-roletip" class="ph-help" style="text-align:center"></div>
         <button id="lb-ready" class="ph-btn">Ready</button>
         <div class="ph-actions">
           <button id="lb-add" class="ph-btn ph-small">${icon("robot", 18)} CPU player</button>
@@ -55,6 +65,10 @@ export class Lobby {
     this.addBtn = el.querySelector("#lb-add")!;
     this.easyBtn = el.querySelector("#lb-easy")!;
     this.removeBtn = el.querySelector("#lb-remove")!;
+    this.hiderBtn = el.querySelector("#lb-hider")!;
+    this.hunterBtn = el.querySelector("#lb-hunter")!;
+    this.hiderBtn.onclick = () => this.actions.role(false);
+    this.hunterBtn.onclick = () => this.actions.role(true);
     this.readyBtn.onclick = () => this.actions.ready(!this.myReady);
     this.addBtn.onclick = () => this.actions.addBot("normal");
     this.easyBtn.onclick = () => this.actions.addBot("easy");
@@ -95,10 +109,15 @@ export class Lobby {
       const score = document.createElement("span");
       score.className = "ph-pts";
       score.textContent = p.score ? `${p.score} pts` : "";
+      const humanHunter = players.some((o) => !o.bot && o.wantHunter);
+      const isHunter = p.wantHunter || (!humanHunter && p.bot && players.find((o) => o.bot) === p);
+      const roleTag = document.createElement("span");
+      roleTag.className = `ph-role${isHunter ? " ph-hunter" : ""}`;
+      roleTag.innerHTML = isHunter ? `${icon("search", 14)} Hunter` : `${icon("ghost", 14)} Hider`;
       const badge = document.createElement("span");
       badge.className = "ph-badge";
       badge.innerHTML = p.ready ? `${icon("check", 14)} Ready` : "Not ready";
-      row.append(av, name, score, badge);
+      row.append(av, name, score, roleTag, badge);
       this.list.appendChild(row);
     });
     for (let i = players.length; i < MAX_PLAYERS; i++) {
@@ -109,11 +128,18 @@ export class Lobby {
     }
     (this.el.querySelector("#lb-count") as HTMLElement).innerHTML = `${icon("user", 15)} ${players.length}/${MAX_PLAYERS}`;
 
-    const everyoneReady = players.length >= MIN_PLAYERS && players.every((p) => p.ready);
+    const hasHunter = players.some((p) => p.wantHunter) || players.some((p) => p.bot);
+    const everyoneReady = players.length >= MIN_PLAYERS && players.every((p) => p.ready) && hasHunter;
     if (players.length < MIN_PLAYERS) this.status.textContent = "Need at least 2 players. Invite a friend or add a CPU.";
+    else if (!hasHunter) this.status.textContent = "Someone must choose Hunter (exactly one hunter per round).";
     else if (everyoneReady) this.status.innerHTML = `Starting in <b>${countdown}</b>`;
     else this.status.textContent = `Waiting for ${players.filter((p) => !p.ready).map((p) => p.name).join(", ")}`;
 
+    const takenBy = players.find((p) => !p.bot && p.wantHunter && !p.me);
+    this.hunterBtn.classList.toggle("ph-on", !!me?.wantHunter);
+    this.hiderBtn.classList.toggle("ph-on", !me?.wantHunter);
+    this.hunterBtn.disabled = !!takenBy;
+    (this.el.querySelector("#lb-roletip") as HTMLElement).textContent = takenBy ? `${takenBy.name} is the hunter this round.` : players.some((p) => p.bot) && !me?.wantHunter && !players.some((p) => !p.bot && p.wantHunter) ? "A CPU player will hunt unless you choose Hunter." : "One hunter, everyone else hides.";
     this.readyBtn.innerHTML = this.myReady ? "Not ready" : `${icon("check", 22)} Ready`;
     this.readyBtn.classList.toggle("ph-off", this.myReady);
     const hasBot = players.some((p) => p.bot);

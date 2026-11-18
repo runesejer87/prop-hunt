@@ -97,3 +97,17 @@ body { font-family: var(--body); color: var(--text); }
 .ph-lobby h2 .ph-icon { color: var(--green); }
 .ph-foot span, .ph-foot a { display: inline-flex; align-items: center; gap: 5px; }
 button, a, input { touch-action: manipulation; }
+
+.ph-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 5px; border-radius: 16px; background: rgba(0, 0, 0, 0.25); }
+.ph-segbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; font: 600 16px var(--display); padding: 11px 8px; border: 0; border-radius: 12px; cursor: pointer; color: #b8bfcc; background: transparent; transition: background 0.15s, color 0.15s; }
+.ph-segbtn.ph-on { background: linear-gradient(180deg, #ffd98a, #ffb454); color: #3b2406; box-shadow: 0 3px 0 #c9822a; }
+.ph-segbtn:disabled { opacity: 0.4; cursor: default; }
+.ph-role { display: inline-flex; align-items: center; gap: 4px; font: 600 12px var(--display); color: #aab2c0; padding: 3px 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); }
+.ph-role.ph-hunter { color: #ffd98a; background: rgba(255, 180, 84, 0.16); }
+@media (max-width: 420px) { .ph-pts, .ph-role { display: none; } }
+
+/* Keep the menus clear of the notch / Dynamic Island and the home bar. */
+.ph-screen, .ph-lobby {
+  padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right));
+}

@@ -103,3 +103,9 @@ Two Vercel projects from this repo:
 - **Lobby:** everyone sees who is in and presses Ready. The round starts 3 seconds after all players (2–4) are ready; CPU players are always ready.
 - **Install (PWA):** open the game in Chrome/Edge/Safari and choose "Install" / "Add to Home Screen". It opens full screen like an app.
 - **Log in once:** your name and the password are saved on the device. "Log out" in the lobby forgets them.
+
+## More worlds, roles, phone fixes
+
+- **Maps:** House, Office, Diner, plus the cosy Playroom, Garden and Bakery. A new map is picked each round.
+- **Roles:** in the lobby each player picks Hunter or Hider. Exactly one hunter is needed to start (a CPU player hunts if no human picks it).
+- **Phone:** the joystick stands still when only touched and reaches full speed about two thirds of the way to the edge, and stays at full speed beyond. The layout respects the notch / Dynamic Island and home bar.

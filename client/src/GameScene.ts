@@ -26,6 +26,7 @@ import {
   MSG_ADD_BOT,
   MSG_REMOVE_BOT,
   MSG_READY,
+  MSG_ROLE,
   MAX_PLAYERS,
   MSG_TAUNTED,
   type TauntEvent,
@@ -171,6 +172,7 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this);
     this.lobby = new Lobby({
       ready: (on) => this.room?.send(MSG_READY, { ready: on }),
+      role: (hunter) => this.room?.send(MSG_ROLE, { hunter }),
       addBot: (level) => this.botButton(level === "easy" ? "addEasy" : "add"),
       removeBot: () => this.botButton("remove"),
       logOut,
@@ -1028,7 +1030,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.hud.setLobbyButtons(false, false, false); // the lobby card has these buttons now
     const lobbyRows: LobbyPlayer[] = [];
-    state.players.forEach((p: PlayerState, id: string) => lobbyRows.push({ name: p.name, ready: p.ready, bot: p.bot, me: id === room.sessionId, score: p.score }));
+    state.players.forEach((p: PlayerState, id: string) => lobbyRows.push({ name: p.name, ready: p.ready, bot: p.bot, me: id === room.sessionId, score: p.score, wantHunter: p.wantHunter }));
     this.lobby.update(phase === "lobby", lobbyRows, state.timeLeft);
     this.hud.setBoard(this.keyTab.isDown || !!this.touch?.scoresHeld || phase === "end", rows, state.round, phase === "end");
 

@@ -3,6 +3,9 @@ import { PROP_TYPES, footprint, DISGUISE_RANGE } from "./props.ts";
 import { HOUSE } from "./maps/house.ts";
 import { OFFICE } from "./maps/office.ts";
 import { DINER } from "./maps/diner.ts";
+import { PLAYROOM } from "./maps/playroom.ts";
+import { GARDEN } from "./maps/garden.ts";
+import { BAKERY } from "./maps/bakery.ts";
 
 export const TILE = 32;
 
@@ -157,7 +160,7 @@ export class GameMap {
 // ---------------------------------------------------------------- registry
 
 /** Every map in the game. Add new maps here. */
-export const MAP_DEFS: readonly MapDef[] = [HOUSE, OFFICE, DINER];
+export const MAP_DEFS: readonly MapDef[] = [HOUSE, OFFICE, DINER, PLAYROOM, GARDEN, BAKERY];
 export const MAP_IDS: readonly string[] = MAP_DEFS.map((m) => m.id);
 export const DEFAULT_MAP_ID = MAP_DEFS[0]!.id;
 

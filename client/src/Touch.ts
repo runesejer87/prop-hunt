@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
+import { getInsets } from "./insets.ts";
 import { addIconTextures, type IconName } from "./icons.ts";
 
 /** What the on-screen buttons can do. The scene supplies these. */
@@ -39,7 +40,9 @@ interface Btn {
   holder: number | null;
 }
 
-const DEAD_ZONE = 0.14;
+const DEAD_ZONE = 0.18;
+/** How far toward the edge of the ring (0 to 1) the thumb must go for full speed. */
+const FULL_AT = 0.65;
 const STICK_BASE = 58;
 
 /**
@@ -58,7 +61,6 @@ export class TouchControls {
   /** Joystick size: bigger on a tablet. */
   private stickR = STICK_BASE;
   private inset = { left: 0, right: 0, bottom: 0, top: 0 };
-  private probe?: HTMLDivElement;
   private stickOrigin = { x: 0, y: 0 };
   private buttons = new Map<Key, Btn>();
   private mode: TouchMode = "none";
@@ -171,25 +173,6 @@ export class TouchControls {
     }
   }
 
-  /** The screen edges that are covered by notches and the home bar (from the CSS safe areas). */
-  private readInsets() {
-    if (!this.probe) {
-      const el = document.createElement("div");
-      el.style.cssText =
-        "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
-        "padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
-      document.body.appendChild(el);
-      this.probe = el;
-    }
-    const cs = getComputedStyle(this.probe);
-    this.inset = {
-      top: parseFloat(cs.paddingTop) || 0,
-      right: parseFloat(cs.paddingRight) || 0,
-      bottom: parseFloat(cs.paddingBottom) || 0,
-      left: parseFloat(cs.paddingLeft) || 0,
-    };
-  }
-
   // -------------------------------------------------------------- touches
 
   private buttonAt(x: number, y: number): Key | null {
@@ -223,21 +206,22 @@ export class TouchControls {
 
   private onMove(pointer: Phaser.Input.Pointer) {
     if (pointer.id !== this.stickId) return;
-    let dx = pointer.x - this.stickOrigin.x;
-    let dy = pointer.y - this.stickOrigin.y;
-    const len = Math.hypot(dx, dy);
-    if (len > this.stickR) {
-      dx = (dx / len) * this.stickR;
-      dy = (dy / len) * this.stickR;
-    }
-    this.thumb.setPosition(this.stickOrigin.x + dx, this.stickOrigin.y + dy);
-    const m = Math.min(1, len / this.stickR);
+    const rx = pointer.x - this.stickOrigin.x;
+    const ry = pointer.y - this.stickOrigin.y;
+    const len = Math.hypot(rx, ry);
+    // The thumb stays inside the ring, however far the finger goes.
+    const shown = Math.min(len, this.stickR);
+    const ux = len > 0 ? rx / len : 0;
+    const uy = len > 0 ? ry / len : 0;
+    this.thumb.setPosition(this.stickOrigin.x + ux * shown, this.stickOrigin.y + uy * shown);
+    // Just touching: stand still. Past the small dead zone speed rises, and from FULL_AT of the way
+    // to the edge it is full speed, and it stays full speed however much further you drag.
+    const m = len / this.stickR;
     if (m < DEAD_ZONE) {
       this.vector = { x: 0, y: 0 };
     } else {
-      // Stretch past the dead zone so the full range still reaches 1.
-      const k = (m - DEAD_ZONE) / (1 - DEAD_ZONE);
-      this.vector = { x: (dx / (len || 1)) * k, y: (dy / (len || 1)) * k };
+      const k = Math.min(1, (m - DEAD_ZONE) / (FULL_AT - DEAD_ZONE));
+      this.vector = { x: ux * k, y: uy * k };
     }
   }
 
@@ -291,7 +275,7 @@ export class TouchControls {
     }
 
     this.checkStuck();
-    this.readInsets();
+    this.inset = getInsets();
     const { width, height } = this.scene.scale;
     const k = Phaser.Math.Clamp(Math.min(width, height) / 420, 0.85, 1.5);
     if (this.stickId === null) {
@@ -323,15 +307,14 @@ export class TouchControls {
     } else {
       for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
-    this.place("scores", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), 92 * k, 17 * k, "≡", "", true, "scores");
-    this.place("mute", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), 92 * k + 42 * k, 15 * k, "♪", "", true, "sound");
+    this.place("scores", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k, 17 * k, "≡", "", true, "scores");
+    this.place("mute", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k + 42 * k, 15 * k, "♪", "", true, "sound");
   }
 
   destroy() {
     this.scene.input.off("pointerdown", this.onDown, this);
     this.scene.input.off("pointermove", this.onMove, this);
     this.scene.input.off("pointerup", this.onUp, this);
-    this.probe?.remove();
     this.scene.input.off("pointerupoutside", this.onUp, this);
   }
 }

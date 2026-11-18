@@ -32,6 +32,7 @@ import {
   MSG_TAUNT,
   MSG_ADD_BOT,
   MSG_READY,
+  MSG_ROLE,
   MSG_REMOVE_BOT,
   type AddBotMessage,
   MSG_TAUNTED,
@@ -179,6 +180,14 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     [MSG_TAUNT]: (client: Client) => this.doTaunt(client.sessionId),
     [MSG_ADD_BOT]: (_client: Client, msg: AddBotMessage) => this.addBot(msg?.level === "easy" ? "easy" : "normal"),
     [MSG_REMOVE_BOT]: () => this.removeBot(),
+    [MSG_ROLE]: (client: Client, msg: { hunter?: boolean }) => {
+      const p = this.state.players.get(client.sessionId);
+      if (!p || this.state.phase !== "lobby") return;
+      const want = !!msg?.hunter;
+      // Only one hunter: if someone else already took it, the answer is no.
+      if (want && this.players().some((o) => !o.bot && o.wantHunter && o.id !== p.id)) return;
+      p.wantHunter = want;
+    },
     [MSG_READY]: (client: Client, msg: { ready?: boolean }) => {
       const p = this.state.players.get(client.sessionId);
       if (p && this.state.phase === "lobby") p.ready = msg?.ready ?? !p.ready;
@@ -264,6 +273,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.score = 0;
     player.gain = 0;
     player.ready = false;
+    player.wantHunter = false;
     player.hp = HUNTER_MAX_HP;
     // Joining mid-round: watch until the next one starts.
     const inRound = this.state.phase !== "lobby";
@@ -332,6 +342,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.name = name;
     player.bot = true;
     player.ready = true;
+    player.wantHunter = false;
     player.score = 0;
     player.gain = 0;
     player.hp = HUNTER_MAX_HP;
@@ -439,14 +450,17 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     return [...this.state.players.values()];
   }
 
+  /** Who will be the hunter if the round starts now (a player who asked for it, otherwise the first CPU player). */
+  private lobbyHunter(): PlayerState | undefined {
+    const all = this.players();
+    return all.find((p) => !p.bot && p.wantHunter) ?? all.find((p) => p.bot);
+  }
+
   private startRound() {
     const all = this.players();
-    // The player who has been hunter the fewest times goes next (ties are random).
-    const fewest = Math.min(...all.map((p) => this.hunts.get(p.id) ?? 0));
-    let candidates = all.filter((p) => (this.hunts.get(p.id) ?? 0) === fewest);
-    // Testing only: FORCE_BOT_HUNTER=1 makes a CPU player the hunter whenever there is one.
-    if (process.env.FORCE_BOT_HUNTER === "1" && all.some((p) => p.bot)) candidates = all.filter((p) => p.bot);
-    const chosen = candidates[Math.floor(Math.random() * candidates.length)]!;
+    // The lobby decides: the player who asked to be the hunter, or else the first CPU player.
+    const chosen = this.lobbyHunter() ?? all[0]!;
+    const fewest = this.hunts.get(chosen.id) ?? 0;
     this.hunts.set(chosen.id, fewest + 1);
     this.state.round += 1;
     this.chooseNextMap();
@@ -484,7 +498,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
   /** A different map each round (the first round can be any of them). */
   private chooseNextMap() {
     const pool = this.state.round <= 1 ? [...MAP_IDS] : MAP_IDS.filter((id) => id !== this.map.id);
-    const next = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)]! : this.map.id;
+    // Testing only: FORCE_MAP=garden always plays that map.
+    const forced = process.env.FORCE_MAP && MAP_IDS.includes(process.env.FORCE_MAP) ? process.env.FORCE_MAP : undefined;
+    const next = forced ?? (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)]! : this.map.id);
     this.map = getMap(next);
     this.state.map = this.map.id;
   }
@@ -511,6 +527,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       p.role = "prop";
       p.alive = true;
       p.ready = p.bot;
+      p.wantHunter = false;
       p.hp = HUNTER_MAX_HP;
       this.clearDisguise(p.id, body);
       this.placeRandomly(body);
@@ -525,7 +542,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     const players = this.players();
 
     if (phase === "lobby") {
-      if (players.length >= MIN_PLAYERS && players.every((p) => p.ready)) {
+      if (players.length >= MIN_PLAYERS && players.every((p) => p.ready) && this.lobbyHunter()) {
         if (this.clockLeft <= 0) this.clockLeft = LOBBY_COUNTDOWN;
         this.clockLeft -= dt;
         this.state.timeLeft = Math.max(0, Math.ceil(this.clockLeft));

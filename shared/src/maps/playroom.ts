@@ -1,0 +1,165 @@
+import type { Door, Item, MapDef, Room, Rug } from "../mapdef.ts";
+
+/**
+ * The playroom: a cosy house of toys. A big play floor, a reading nook, a craft room,
+ * a bedroom and a snack corner. Toy blocks, teddies and beach balls are everywhere,
+ * so hiders have plenty of lookalikes.
+ */
+const rooms: Room[] = [
+  { name: "Play Floor", x: 1, y: 1, w: 16, h: 11, color: 0x8a6a7a, floor: "carpet" },
+  { name: "Reading Nook", x: 18, y: 1, w: 13, h: 11, color: 0x7a5a3e, floor: "wood" },
+  { name: "Craft Room", x: 1, y: 13, w: 10, h: 8, color: 0x6a5a46, floor: "wood" },
+  { name: "Bedroom", x: 12, y: 13, w: 9, h: 8, color: 0x5a6a8a, floor: "carpet" },
+  { name: "Snack Corner", x: 22, y: 13, w: 9, h: 8, color: 0x8a7a5a, floor: "tile" },
+];
+
+const doors: Door[] = [
+  { x: 17, y: 5, w: 1, h: 2 },
+  { x: 4, y: 12, w: 2, h: 1 },
+  { x: 15, y: 12, w: 2, h: 1 },
+  { x: 19, y: 12, w: 2, h: 1 },
+  { x: 25, y: 12, w: 2, h: 1 },
+  { x: 11, y: 16, w: 1, h: 2 },
+  { x: 21, y: 16, w: 1, h: 2 },
+];
+
+const cafeSet = (x: number, y: number): Item[] => [
+  ["cafe_table", x, y],
+  ["chair", x - 34, y, 3],
+  ["chair", x + 34, y, 1],
+  ["chair", x, y - 34, 0],
+  ["chair", x, y + 34, 2],
+];
+
+const layout: Record<string, Item[]> = {
+  "Play Floor": [
+    ["bookshelf", 120, 46],
+    ["bookshelf", 216, 46],
+    ["bookshelf", 312, 46],
+    ["toy_chest", 420, 50],
+    ["toy_chest", 470, 50],
+    ["lamp", 52, 52],
+    ["plant", 520, 52],
+    // A play table with stools
+    ["table", 290, 200],
+    ["stool", 216, 200],
+    ["stool", 364, 200],
+    ["stool", 262, 150],
+    ["stool", 318, 150],
+    ["stool", 262, 252],
+    ["stool", 318, 252],
+    ["toy_block", 290, 200, 0, true],
+    // A tower of blocks
+    ["toy_block", 100, 130],
+    ["toy_block", 132, 130],
+    ["toy_block", 116, 162],
+    ["toy_block", 100, 194],
+    ["teddy", 80, 300],
+    ["teddy", 440, 320],
+    ["teddy", 430, 130],
+    ["teddy", 250, 300],
+    ["beachball", 60, 230],
+    ["beachball", 480, 232],
+    ["beachball", 360, 330],
+    ["box", 95, 345],
+    ["crate", 250, 340],
+    ["crate", 290, 345],
+    ["armchair", 500, 290],
+    ["plant", 52, 360],
+  ],
+  "Reading Nook": [
+    ["bookshelf", 640, 46],
+    ["bookshelf", 736, 46],
+    ["bookshelf", 832, 46],
+    ["bookshelf", 928, 46],
+    ["sofa", 800, 170, 2],
+    ["coffee_table", 800, 230],
+    ["armchair", 700, 200],
+    ["armchair", 900, 200],
+    ["lamp", 960, 100],
+    ["plant", 600, 100],
+    ["plant", 970, 350],
+    ["table", 780, 290],
+    ["globe", 780, 290, 0, true],
+    ["teddy", 930, 300],
+    ["teddy", 620, 250],
+    ["beachball", 900, 330],
+    ["stool", 700, 300],
+    ["lamp", 590, 340],
+  ],
+  "Craft Room": [
+    ["workbench", 260, 436],
+    ["shelf", 46, 500, 1],
+    ["shelf", 46, 620, 1],
+    ["table", 120, 560],
+    ["stool", 60, 560],
+    ["stool", 180, 560],
+    ["stool", 96, 520],
+    ["stool", 144, 520],
+    ["toy_block", 120, 560, 0, true],
+    ["bucket", 300, 640],
+    ["toolbox", 260, 640],
+    ["box", 300, 600],
+    ["crate", 250, 600],
+    ["barrel", 330, 440],
+    ["plant", 335, 655],
+    ["lamp", 90, 650],
+    ["trashcan", 330, 480],
+  ],
+  Bedroom: [
+    ["bed", 470, 520],
+    ["bed", 556, 520],
+    ["nightstand", 404, 440],
+    ["dresser", 520, 650],
+    ["wardrobe", 600, 650],
+    ["toy_chest", 420, 650],
+    ["teddy", 470, 500, 0, true],
+    ["teddy", 556, 500, 0, true],
+    ["lamp", 404, 478],
+    ["plant", 650, 640],
+  ],
+  "Snack Corner": [
+    ["fridge", 740, 440],
+    ["counter", 780, 650],
+    ["counter", 910, 650],
+    ...cafeSet(850, 540),
+    ["cafe_table", 930, 490],
+    ["chair", 896, 490, 3],
+    ["chair", 964, 490, 1],
+    ["chair", 930, 524, 2],
+    ["cake", 850, 540, 0, true],
+    ["cake", 930, 490, 0, true],
+    ["vending", 960, 600],
+    ["plant", 730, 600],
+    ["lamp", 770, 490],
+  ],
+};
+
+const rugs: Rug[] = [
+  { x: 290, y: 200, w: 260, h: 180, color: 0x8a5a6a },
+  { x: 800, y: 200, w: 300, h: 160, color: 0x6a8a5a },
+  { x: 120, y: 560, w: 150, h: 110, color: 0x6a7a8a },
+  { x: 530, y: 560, w: 200, h: 120, color: 0x5a6a9a },
+  { x: 880, y: 520, w: 200, h: 150, color: 0x8a6a4a },
+];
+
+const labels: Record<string, [number, number]> = {
+  "Play Floor": [150, 370],
+  "Reading Nook": [640, 360],
+  "Craft Room": [100, 650],
+  Bedroom: [440, 650],
+  "Snack Corner": [880, 460],
+};
+
+export const PLAYROOM: MapDef = {
+  id: "playroom",
+  name: "The Playroom",
+  cols: 32,
+  rows: 22,
+  rooms,
+  doors,
+  layout,
+  rugs,
+  labels,
+  hunterStart: "Play Floor",
+};

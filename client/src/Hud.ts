@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { HUNTER_MAX_HP } from "@prop-hunt/shared";
 import { COLOR, CSS, FONT_BODY, FONT_DISPLAY } from "./theme.ts";
+import { getInsets } from "./insets.ts";
 import { addIconTextures, type IconName } from "./icons.ts";
 
 export interface BoardRow {
@@ -38,6 +39,7 @@ export class Hud {
   private abilityText: Phaser.GameObjects.Text;
   private warning: Phaser.GameObjects.Text;
   private touchMode = false;
+  private panelBottom = 0;
   private abilityName: IconName = "radar";
   private abilityReady = true;
   private titleIcon: Phaser.GameObjects.Image;
@@ -114,7 +116,7 @@ export class Hud {
 
   setPrompt(text: string | null) {
     const { width, height } = this.scene.scale;
-    if (text) this.prompt.setText(text).setPosition(width / 2, height - (this.touchMode ? 30 : 46)).setVisible(true);
+    if (text) this.prompt.setText(text).setPosition(width / 2, height - getInsets().bottom - (this.touchMode ? 30 : 46)).setVisible(true);
     else this.prompt.setVisible(false);
   }
 
@@ -173,7 +175,7 @@ export class Hud {
       this.warning.setVisible(false);
       return;
     }
-    this.warning.setWordWrapWidth(Math.max(160, width - 24)).setPosition(width / 2, this.top.y + 118).setText(text).setVisible(true).setAlpha(0.6 + 0.4 * Math.abs(Math.sin(time / 180)));
+    this.warning.setWordWrapWidth(Math.max(160, width - 24)).setPosition(width / 2, getInsets().top + this.panelBottom + 8).setText(text).setVisible(true).setAlpha(0.6 + 0.4 * Math.abs(Math.sin(time / 180)));
   }
 
   /** The ability button in the bottom right: its name, and when it is ready. */
@@ -189,14 +191,14 @@ export class Hud {
     this.abilityText
       .setText(ready ? `F · ${label}` : `F · ${label}  ${cooldown}s`)
       .setColor(ready ? CSS.green : CSS.dim)
-      .setPosition(width - 26, height - 20)
+      .setPosition(width - Math.max(26, getInsets().right + 14), height - getInsets().bottom - 20)
       .setVisible(true);
   }
 
   /** A short message in the top left corner. */
   toast(message: string) {
     const { height } = this.scene.scale;
-    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 48)).setPosition(26, (this.touchMode ? height - 78 : 24) + 0).setAlpha(1).setVisible(true);
+    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 48)).setPosition(Math.max(26, getInsets().left + 14), this.touchMode ? height - getInsets().bottom - 78 : getInsets().top + 24).setAlpha(1).setVisible(true);
     this.toastBg.clear().setAlpha(1);
     const b = this.toastText.getBounds();
     panel(this.toastBg, b.x - 14, b.y - 8, b.width + 28, b.height + 16, 14, 0.85);
@@ -210,7 +212,7 @@ export class Hud {
   /** Small status line above the prompt, e.g. whether you are a perfect copy yet. */
   setNote(text: string | null, color = "#ffffff") {
     const { width, height } = this.scene.scale;
-    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - (this.touchMode ? 70 : 88)).setVisible(true);
+    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - getInsets().bottom - (this.touchMode ? 70 : 88)).setVisible(true);
     else this.note.setVisible(false);
   }
 
@@ -238,7 +240,7 @@ export class Hud {
     this.top.y = 0;
 
     if (!info.connected) {
-      this.title.setText("Connecting…").setVisible(true).setPosition(width / 2, 22);
+      this.title.setText("Connecting…").setVisible(true).setPosition(width / 2, getInsets().top + 22);
       this.titleIcon.setVisible(false);
       this.sub.setText("").setVisible(false);
       this.drawTop(width, 22, 0, -1);
@@ -285,10 +287,11 @@ export class Hud {
       info.phase === "end" ? "trophy" : info.role === "spectator" || (!info.alive && info.phase === "hunt") ? "binoculars" : isHunter ? "search" : info.phase === "hide" ? "hide" : info.phase === "hunt" ? "ghost" : null;
     this.titleIcon.setVisible(!!titleIcon && title !== "");
     if (titleIcon) this.titleIcon.setTexture(`ic_${titleIcon}`).setTint(info.phase === "end" ? COLOR.yellow : isHunter ? COLOR.blue : COLOR.green).setDisplaySize(26, 26);
-    this.title.setPosition(width / 2 + 17, 14);
-    this.titleIcon.setPosition(width / 2 - this.title.width / 2 - 1, 14 + this.title.height / 2 + 1);
-    this.sub.setPosition(width / 2, 14 + this.title.height + 0);
-    this.hint.setText(this.touchMode ? "" : hint).setPosition(26, height - 16);
+    const ins = getInsets();
+    this.title.setPosition(width / 2 + 17, ins.top + 14);
+    this.titleIcon.setPosition(width / 2 - this.title.width / 2 - 1, ins.top + 14 + this.title.height / 2 + 1);
+    this.sub.setPosition(width / 2, ins.top + 14 + this.title.height);
+    this.hint.setText(this.touchMode ? "" : hint).setPosition(Math.max(26, ins.left + 14), height - ins.bottom - 16);
 
     // Top panel and the time bar inside it.
     const f = info.fraction ?? -1;
@@ -309,8 +312,10 @@ export class Hud {
     this.hpIcon.setVisible(showHp);
     if (showHp) {
       const w = 150;
-      const bx = width - 26 - w;
-      const by = 22;
+      // On a narrow screen the health bar goes under the title panel instead of beside it.
+      const narrowScreen = width < 700;
+      const bx = narrowScreen ? width / 2 + w / 2 - 6 - w : width - Math.max(26, ins.right + 14) - w;
+      const by = narrowScreen ? ins.top + this.panelBottom + 28 : ins.top + 22;
       panel(this.hpGfx, bx - 44, by - 14, w + 62, 42, 21, 0.82);
       this.hpGfx.fillStyle(0x000000, 0.5).fillRoundedRect(bx, by, w, 14, 7);
       const k = Math.max(0, Math.min(1, info.hp / HUNTER_MAX_HP));
@@ -349,10 +354,12 @@ export class Hud {
     const barH = fraction >= 0 ? 10 : 0;
     const h = contentH + barH;
     const x = width / 2 - w / 2;
-    panel(this.top, x, 6, w, h, 18, 0.8);
+    const topY = 6 + getInsets().top;
+    this.panelBottom = h + 6;
+    panel(this.top, x, topY, w, h, 18, 0.8);
     if (fraction >= 0) {
       const bw = w - 36;
-      const by = 6 + h - 16;
+      const by = topY + h - 16;
       this.timer.fillStyle(0x000000, 0.5).fillRoundedRect(x + 18, by, bw, 6, 3);
       const col = fraction > 0.4 ? COLOR.green : fraction > 0.15 ? COLOR.yellow : COLOR.red;
       this.timer.fillStyle(col, 1).fillRoundedRect(x + 18, by, Math.max(6, bw * Math.min(1, fraction)), 6, 3);
