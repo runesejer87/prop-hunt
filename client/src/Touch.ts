@@ -14,9 +14,11 @@ export interface TouchActions {
   /** Hold to inspect: true when the finger goes down, false when it lifts. */
   inspect(on: boolean): void;
   mute(): void;
+  /** One of the emote buttons (0 to 4). */
+  emote(index: number): void;
 }
 
-export type TouchMode = "none" | "prop" | "hunter";
+export type TouchMode = "none" | "prop" | "hunter" | "ghost";
 
 /** Is this a phone or tablet (a screen you touch)? */
 export function isTouchDevice(): boolean {
@@ -27,7 +29,9 @@ export function isTouchDevice(): boolean {
   }
 }
 
-type Key = "main" | "a" | "b" | "ability" | "taunt" | "scores" | "mute";
+type Key = "main" | "a" | "b" | "ability" | "taunt" | "scores" | "mute" | "emote" | "e0" | "e1" | "e2" | "e3" | "e4";
+const EMOTE_KEYS: Key[] = ["e0", "e1", "e2", "e3", "e4"];
+const EMOTE_ICONS: IconName[] = ["wave", "laugh", "heart", "question", "party"];
 
 interface Btn {
   color: number;
@@ -66,6 +70,7 @@ export class TouchControls {
   private stickOrigin = { x: 0, y: 0 };
   private buttons = new Map<Key, Btn>();
   private mode: TouchMode = "none";
+  private emoteOpen = false;
   /** Set by the scene: true where a button of the page is, so a touch there does not start the joystick. */
   blocked?: (x: number, y: number) => boolean;
 
@@ -78,7 +83,7 @@ export class TouchControls {
     this.base = scene.add.circle(0, 0, this.stickR, 0xffffff, 0.1).setStrokeStyle(3, 0xffffff, 0.3).setScrollFactor(0).setDepth(d).setVisible(false);
     this.thumb = scene.add.circle(0, 0, 26, 0xffffff, 0.35).setStrokeStyle(2, 0xffffff, 0.6).setScrollFactor(0).setDepth(d + 1).setVisible(false);
 
-    const colors: Record<Key, number> = { main: 0x4ade80, a: 0x60a5fa, b: 0xf59e0b, ability: 0xa78bfa, taunt: 0xf472b6, scores: 0x94a3b8, mute: 0x94a3b8 };
+    const colors: Record<Key, number> = { main: 0x4ade80, a: 0x60a5fa, b: 0xf59e0b, ability: 0xa78bfa, taunt: 0xf472b6, scores: 0x94a3b8, mute: 0x94a3b8, emote: 0xfbbf24, e0: 0xfbbf24, e1: 0xfbbf24, e2: 0xfbbf24, e3: 0xfbbf24, e4: 0xfbbf24 };
     for (const key of Object.keys(colors) as Key[]) {
       const color = colors[key];
       const circle = scene.add.circle(0, 0, 40, color, 0.28).setStrokeStyle(3, color, 0.85).setScrollFactor(0).setDepth(d).setVisible(false);
@@ -133,6 +138,14 @@ export class TouchControls {
       case "mute":
         this.actions.mute();
         break;
+      case "emote":
+        this.emoteOpen = !this.emoteOpen;
+        break;
+      default:
+        if (key.startsWith("e")) {
+          this.actions.emote(Number(key.slice(1)));
+          this.emoteOpen = false;
+        }
     }
   }
 
@@ -263,7 +276,7 @@ export class TouchControls {
   }
 
   /** Called every frame: shows the right buttons for the player's role and lays them out for this screen. */
-  update(mode: TouchMode, ability: { label: string; cooldown: number } | null) {
+  update(mode: TouchMode, ability: { label: string; cooldown: number } | null, canEmote = false) {
     // If the role changed while a button was held, let go cleanly.
     if (mode !== this.mode) {
       for (const [key, b] of this.buttons) {
@@ -292,7 +305,7 @@ export class TouchControls {
     const abilityOn = !!ability;
     const abilityLabel = cd > 0 ? `${cd}` : "F";
     const abilitySub = ability?.label ?? "";
-    const abilityIcon: IconName | undefined = cd > 0 ? undefined : mode === "hunter" ? "radar" : "megaphone";
+    const abilityIcon: IconName | undefined = cd > 0 ? undefined : mode === "hunter" ? "radar" : mode === "ghost" ? "ghost" : "megaphone";
 
     if (mode === "prop") {
       this.place("main", cx, cy, R, "E", "Become", true, "cube");
@@ -306,14 +319,23 @@ export class TouchControls {
       this.place("b", 0, 0, 0, "", "", false);
       this.place("taunt", 0, 0, 0, "", "", false);
       this.place("ability", cx - R * 0.3, cy - R * 2.15, R * 0.72, abilityLabel, cd > 0 ? "" : abilitySub, abilityOn, abilityIcon);
+    } else if (mode === "ghost") {
+      for (const key of ["main", "a", "b", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
+      this.place("ability", cx, cy, R, abilityLabel, cd > 0 ? "" : abilitySub, abilityOn, abilityIcon);
     } else {
       for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
     // Where the action buttons start, so the game's messages can stay above them.
     let top = Infinity;
-    for (const [key, b] of this.buttons) if (key !== "scores" && key !== "mute" && b.circle.visible) top = Math.min(top, b.circle.y - b.radius);
+    for (const [key, b] of this.buttons) if (key !== "scores" && key !== "mute" && key !== "emote" && !key.startsWith("e") && b.circle.visible) top = Math.min(top, b.circle.y - b.radius);
     this.topEdge = top;
     this.place("scores", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k, 17 * k, "≡", "", true, "scores");
+    // Emotes: a smiley under the sound button; tap it to open a row of five.
+    if (!canEmote) this.emoteOpen = false;
+    const ex = width - Math.max(30 * k, this.inset.right + 14 + 17 * k);
+    const ey = this.inset.top + 70 * k + 42 * k + 40 * k;
+    this.place("emote", ex, ey, 15 * k, "", "", canEmote, "laugh");
+    EMOTE_KEYS.forEach((key, i) => this.place(key, ex - (i + 1) * 40 * k, ey, 15 * k, "", "", canEmote && this.emoteOpen, EMOTE_ICONS[i]));
     this.place("mute", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k + 42 * k, 15 * k, "♪", "", true, "sound");
   }
 

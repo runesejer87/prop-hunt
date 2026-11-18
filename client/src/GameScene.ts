@@ -28,6 +28,18 @@ import {
   MSG_REMOVE_BOT,
   MSG_READY,
   MSG_ROLE,
+  MSG_SETTINGS,
+  MSG_EMOTE,
+  MSG_EMOTED,
+  MSG_BOO,
+  MSG_RATTLE,
+  MSG_RECAP,
+  EMOTE_KINDS,
+  GHOST_BOO_RANGE,
+  GHOST_RATTLE_RANGE,
+  type EmoteEvent,
+  type RattleEvent,
+  type RecapEntry,
   MAX_PLAYERS,
   MSG_TAUNTED,
   type TauntEvent,
@@ -68,6 +80,8 @@ export class GameScene extends Phaser.Scene {
   private styleOf = new Map<string, string>();
   private reticle!: Phaser.GameObjects.Graphics;
   private reticleIcon!: Phaser.GameObjects.Image;
+  private emoteKeys: Phaser.Input.Keyboard.Key[] = [];
+  private wasGhost = false;
   private curInput = { dx: 0, dy: 0 };
   private frameDelta = 16.7;
   private hunterView!: Phaser.GameObjects.Graphics;
@@ -143,6 +157,7 @@ export class GameScene extends Phaser.Scene {
     this.keyX = this.input.keyboard!.addKey("X");
     this.input.keyboard!.addCapture("TAB");
     this.keySpace = this.input.keyboard!.addKey("SPACE");
+    this.emoteKeys = ["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((k) => this.input.keyboard!.addKey(k));
 
     // Browsers only allow sound after a click or key press.
     const unlock = () => this.sfx.unlock();
@@ -176,6 +191,7 @@ export class GameScene extends Phaser.Scene {
       role: (role) => this.room?.send(MSG_ROLE, { role }),
       addBot: (level) => this.botButton(level === "easy" ? "addEasy" : "add"),
       removeBot: () => this.botButton("remove"),
+      settings: (s) => this.room?.send(MSG_SETTINGS, s),
       logOut,
     });
     this.reticle = this.add.graphics().setDepth(60);
@@ -202,6 +218,7 @@ export class GameScene extends Phaser.Scene {
         ability: () => this.doAbility(),
         swing: () => this.swing(),
         inspect: (on) => (on ? this.startInspect() : this.stopInspect()),
+        emote: (i) => this.emote(i),
         mute: () => this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on"),
       });
       this.touch.blocked = (x, y) => this.hud.lobbyButtonAt(x, y) !== null;
@@ -325,6 +342,10 @@ export class GameScene extends Phaser.Scene {
       this.idleFrames.delete(id);
       if (id === room.sessionId) this.selfRing?.destroy();
     });
+    room.onMessage(MSG_EMOTED, (e: EmoteEvent) => this.showEmote(e));
+    room.onMessage(MSG_RATTLE, (r: RattleEvent) => this.showRattle(r));
+    room.onMessage(MSG_BOO, () => this.showBoo());
+    room.onMessage(MSG_RECAP, (entries: RecapEntry[]) => this.showRecap(entries));
     room.onMessage(MSG_SWING, (e: SwingEvent) => this.showSwing(e));
     room.onMessage(MSG_PING, (p: PingEvent) => this.showPing(p));
     room.onMessage(MSG_INSPECT_RESULT, (r: InspectResult) => this.showInspectResult(r));
@@ -547,6 +568,136 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: bubble, y: bubble.y - 34, alpha: 0, scale: 1.25, duration: 1700, ease: "Quad.easeOut", onComplete: () => bubble.destroy() });
   }
 
+  /** Found, or joined mid-round: a ghost floats through walls and can help the hiders. */
+  private isGhost(p: PlayerState): boolean {
+    return p.role === "spectator" || (p.role === "prop" && !p.alive);
+  }
+
+  /** Emotes: living hiders must stay quiet (it would give them away). */
+  private canEmote(): boolean {
+    const me = this.me;
+    const phase = this.room?.state.phase;
+    if (!me || !phase) return false;
+    return !((phase === "hide" || phase === "hunt") && me.role === "prop" && me.alive);
+  }
+
+  private emote(index: number) {
+    const kind = EMOTE_KINDS[index];
+    if (!kind || !this.room) return;
+    if (!this.canEmote()) {
+      this.hud.toast("Hiders stay quiet! Emotes would give you away");
+      return;
+    }
+    this.room.send(MSG_EMOTE, { kind });
+  }
+
+  private emoteIcon: Record<string, string> = { wave: "ic_wave", laugh: "ic_laugh", heart: "ic_heart", question: "ic_question", party: "ic_party" };
+
+  /** A little picture floats up above a player. */
+  private showEmote(e: EmoteEvent) {
+    const dot = this.sprites.get(e.id);
+    if (!dot) return;
+    const x = dot.x;
+    const y = dot.y - 40;
+    const bg = this.add.graphics().setDepth(80);
+    bg.fillStyle(0x000000, 0.25).fillCircle(x + 1, y + 3, 17);
+    bg.fillStyle(0xfff7e0, 0.97).fillCircle(x, y, 16);
+    bg.lineStyle(2, 0xffb454, 1).strokeCircle(x, y, 16);
+    bg.fillStyle(0xfff7e0, 0.97).fillTriangle(x - 5, y + 13, x + 5, y + 13, x, y + 22);
+    const colors: Record<string, number> = { wave: 0xf59e0b, laugh: 0xf59e0b, heart: 0xef4444, question: 0x3b82f6, party: 0xec4899 };
+    const img = this.add.image(x, y, this.emoteIcon[e.kind] ?? "ic_heart").setDepth(81).setDisplaySize(20, 20).setTint(colors[e.kind] ?? 0xf59e0b);
+    bg.setScale(0.2);
+    this.tweens.add({ targets: bg, scale: 1, duration: 200, ease: "Back.easeOut" });
+    this.tweens.add({ targets: [bg, img], y: "-=18", alpha: 0, delay: 1500, duration: 800, onComplete: () => { bg.destroy(); img.destroy(); } });
+    const p = this.audioFrom(dot.x, dot.y);
+    if (p.vol > 0.1) this.sfx.step(p.vol * 0.6, p.pan);
+  }
+
+  /** A ghost rattled an object: it shakes for a moment. */
+  private showRattle(r: RattleEvent) {
+    let best: { type: string; x: number; y: number; rot: number } | undefined;
+    let bd = 12;
+    for (const p of this.map.props) {
+      const d = Math.hypot(p.x - r.x, p.y - r.y);
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    if (!best) return;
+    const clone = this.add.image(best.x, best.y, `prop_${best.type}`).setDepth(2.1).setRotation((best.rot * Math.PI) / 2);
+    this.tweens.add({ targets: clone, angle: `+=${10}`, duration: 70, yoyo: true, repeat: 5, onComplete: () => clone.destroy() });
+    this.burst(best.x, best.y, 0xcdb8ff, 8, 50, 700, 3, 0.6);
+    const p = this.audioFrom(best.x, best.y);
+    if (p.vol > 0.05) this.sfx.scrape(Math.max(0.3, p.vol), p.pan);
+  }
+
+  /** A ghost gave the hunter a fright. */
+  private showBoo() {
+    this.cameras.main.shake(260, 0.012);
+    this.sfx.taunt(2, 1, 0);
+    const t = this.add
+      .text(this.scale.width / 2, this.scale.height * 0.4, "BOO!", { fontFamily: FONT_DISPLAY, fontSize: "88px", fontStyle: "700", color: "#e9d5ff", stroke: "#2b1a45", strokeThickness: 10 })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(120);
+    this.tweens.add({ targets: t, scale: { from: 0.5, to: 1.3 }, alpha: { from: 1, to: 0 }, duration: 900, ease: "Quad.easeOut", onComplete: () => t.destroy() });
+  }
+
+  // ---- the end-of-round reveal
+
+  private recapObjects: Phaser.GameObjects.GameObject[] = [];
+  private recapTimers: Phaser.Time.TimerEvent[] = [];
+
+  /** Show where each hider was, one by one, with the camera visiting each. */
+  private showRecap(entries: RecapEntry[]) {
+    this.clearRecap();
+    const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    const cam = this.cameras.main;
+    const order = [...entries].sort((a, b) => a.at - b.at);
+    order.forEach((e, i) => {
+      const ring = this.add.graphics().setDepth(65);
+      ring.lineStyle(3, e.found ? 0xff8a8a : 0x7cf5a0, 1).strokeCircle(e.x, e.y, 26);
+      ring.setAlpha(0);
+      const name = this.add
+        .text(e.x, e.y - 50, `${e.name}${e.as ? ` as ${e.as}` : ""}`, { fontFamily: FONT_DISPLAY, fontSize: "18px", fontStyle: "600", color: "#ffffff", stroke: "#0b0d12", strokeThickness: 5 })
+        .setOrigin(0.5)
+        .setDepth(66)
+        .setAlpha(0);
+      const sub = this.add
+        .text(e.x, e.y - 30, e.found ? `found at ${fmt(e.at)}` : "never found!", { fontFamily: FONT_BODY, fontSize: "14px", fontStyle: "800", color: e.found ? "#ffb3b3" : "#9dffa8", stroke: "#0b0d12", strokeThickness: 4 })
+        .setOrigin(0.5)
+        .setDepth(66)
+        .setAlpha(0);
+      this.recapObjects.push(ring, name, sub);
+      // One after the other: the camera visits each hider, and their label pops up.
+      this.recapTimers.push(
+        this.time.delayedCall(700 + i * 2600, () => {
+          cam.stopFollow();
+          cam.pan(e.x, e.y + this.scale.height * 0.3, 600, "Sine.easeInOut");
+          this.tweens.add({ targets: [ring, name, sub], alpha: 1, duration: 300, delay: 400 });
+          this.tweens.add({ targets: ring, scale: { from: 1.4, to: 1 }, duration: 400, delay: 400 });
+        }),
+      );
+    });
+    // After the tour the camera comes back to me.
+    this.recapTimers.push(
+      this.time.delayedCall(700 + order.length * 2600, () => {
+        const mine = this.room ? this.sprites.get(this.room.sessionId) : undefined;
+        if (mine) cam.startFollow(mine, true, 0.1, 0.1);
+      }),
+    );
+  }
+
+  private clearRecap() {
+    for (const t of this.recapTimers) t.remove(false);
+    this.recapTimers = [];
+    for (const o of this.recapObjects) o.destroy();
+    this.recapObjects = [];
+    const mine = this.room ? this.sprites.get(this.room.sessionId) : undefined;
+    if (mine) this.cameras.main.startFollow(mine, true, 0.15, 0.15);
+  }
+
   /** Lobby: add or remove a computer player. */
   private botButton(which: "add" | "addEasy" | "remove") {
     if (!this.room || this.room.state.phase !== "lobby") return;
@@ -561,7 +712,31 @@ export class GameScene extends Phaser.Scene {
   private doAbility() {
     const me = this.me;
     const room = this.room;
-    if (!room || !me || room.state.phase !== "hunt" || !me.alive || me.cooldown > 0) return;
+    if (!room || !me || room.state.phase !== "hunt" || me.cooldown > 0) return;
+    if (this.isGhost(me)) {
+      // A ghost needs to be next to the hunter (boo!) or an object (rattle it).
+      const myDot = this.sprites.get(room.sessionId);
+      let ok = false;
+      if (myDot) {
+        room.state.players.forEach((p: PlayerState, id: string) => {
+          const d = this.sprites.get(id);
+          if (p.role === "hunter" && d && Math.hypot(d.x - myDot.x, d.y - myDot.y) < GHOST_BOO_RANGE) ok = true;
+        });
+        for (const p of this.map.props) {
+          const f = footprint(p.type, p.rot);
+          const dx = Math.max(Math.abs(myDot.x - p.x) - f.w / 2, 0);
+          const dy = Math.max(Math.abs(myDot.y - p.y) - f.h / 2, 0);
+          if (Math.hypot(dx, dy) <= GHOST_RATTLE_RANGE) ok = true;
+        }
+      }
+      if (!ok) {
+        this.hud.toast("Float next to an object (rattle it) or the hunter (boo!)");
+        return;
+      }
+      room.send(MSG_ABILITY);
+      return;
+    }
+    if (!me.alive) return;
     if (me.role !== "prop" && me.role !== "hunter") return;
     room.send(MSG_ABILITY);
     if (me.role === "prop") {
@@ -763,6 +938,12 @@ export class GameScene extends Phaser.Scene {
     }
     if (state.map && state.map !== this.mapId) this.buildWorld(state.map);
     const phase = state.phase;
+    if ((phase === "lobby" || phase === "hide") && this.recapObjects.length > 0) this.clearRecap();
+    const ghostNow = this.isGhost(me);
+    if (ghostNow && !this.wasGhost && (phase === "hunt" || phase === "hide")) {
+      this.hud.toast(this.touch ? "You're a ghost! Float anywhere and use Boo" : "You're a ghost! Float anywhere. F to boo");
+    }
+    this.wasGhost = ghostNow;
     const myDot = this.sprites.get(room.sessionId);
     const iAmHunter = me.role === "hunter";
     const frozen = iAmHunter && (phase === "hide" || me.inspect > 0);
@@ -801,6 +982,9 @@ export class GameScene extends Phaser.Scene {
       else this.doTaunt();
     }
     if (Phaser.Input.Keyboard.JustDown(this.keyF)) this.doAbility();
+    this.emoteKeys.forEach((k, i) => {
+      if (Phaser.Input.Keyboard.JustDown(k)) this.emote(i);
+    });
     if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.botButton("add");
     if (Phaser.Input.Keyboard.JustDown(this.keyX)) this.botButton("remove");
     if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.hud.toast(this.sfx.toggleMute() ? "Sound off" : "Sound on");
@@ -824,7 +1008,8 @@ export class GameScene extends Phaser.Scene {
       const len = Math.hypot(dx, dy);
       const moving = len > 0.05;
       if (moving) {
-        const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0) * Math.min(delta, 50) * Math.min(1, len)) / 1000;
+        const ghost = this.isGhost(me);
+        const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0, state.easy, ghost) * Math.min(delta, 50) * Math.min(1, len)) / 1000;
         // Players disguised as objects are solid (only the ones we can see).
         const solid = (px: number, py: number, r: number) => {
           let hit = false;
@@ -837,7 +1022,11 @@ export class GameScene extends Phaser.Scene {
           });
           return hit;
         };
-        const pieces = Math.max(1, Math.ceil(step / 6));
+        if (ghost) {
+          // Ghosts float through walls and furniture.
+          dot.setPosition(Phaser.Math.Clamp(dot.x + (dx / len) * step, 8, this.map.width - 8), Phaser.Math.Clamp(dot.y + (dy / len) * step, 8, this.map.height - 8));
+        }
+        const pieces = ghost ? 0 : Math.max(1, Math.ceil(step / 6));
         let x = dot.x;
         let y = dot.y;
         for (let i = 0; i < pieces; i++) {
@@ -845,7 +1034,7 @@ export class GameScene extends Phaser.Scene {
           x = n.x;
           y = n.y;
         }
-        dot.setPosition(x, y);
+        if (!ghost) dot.setPosition(x, y);
       }
 
       // Correct drift toward the server's version of events. The server is always a
@@ -999,10 +1188,11 @@ export class GameScene extends Phaser.Scene {
 
     // Touch buttons for the role you have right now.
     if (this.touch) {
-      const mode = !me.alive || me.role === "spectator" || phase === "end" ? "none" : me.role === "hunter" ? "hunter" : "prop";
-      const abilityOn = phase === "hunt" && me.alive && (me.role === "hunter" || me.role === "prop");
+      const ghostNow = this.isGhost(me);
+      const mode = phase === "end" || phase === "lobby" ? "none" : ghostNow ? "ghost" : me.role === "hunter" ? "hunter" : "prop";
+      const abilityOn = phase === "hunt" && (ghostNow || me.role === "hunter" || me.role === "prop");
       this.hud.setBottomLimit(this.touch.topEdge);
-      this.touch.update(mode, abilityOn ? { label: me.role === "hunter" ? "Radar" : "Distract", cooldown: me.cooldown } : null);
+      this.touch.update(mode, abilityOn ? { label: ghostNow ? "Boo" : me.role === "hunter" ? "Radar" : "Distract", cooldown: me.cooldown } : null, (this.canEmote() && phase !== "lobby") || phase === "end");
     }
 
     // Prompt to copy a nearby object (props only).
@@ -1037,11 +1227,11 @@ export class GameScene extends Phaser.Scene {
     this.hud.setLobbyButtons(false, false, false); // the lobby card has these buttons now
     const lobbyRows: LobbyPlayer[] = [];
     state.players.forEach((p: PlayerState, id: string) => lobbyRows.push({ name: p.name, ready: p.ready, bot: p.bot, me: id === room.sessionId, score: p.score, wantHunter: p.wantHunter, wantHider: p.wantHider }));
-    this.lobby.update(phase === "lobby", lobbyRows, state.timeLeft);
+    this.lobby.update(phase === "lobby", lobbyRows, state.timeLeft, { easy: state.easy, length: state.huntLength });
     this.hud.setBoard(this.keyTab.isDown || !!this.touch?.scoresHeld || phase === "end", rows, state.round, phase === "end");
 
-    const abilityLabel = phase === "hunt" && me.alive ? (me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;
-    this.hud.setAbility(abilityLabel, me.cooldown);
+    const abilityLabel = phase === "hunt" ? (this.isGhost(me) ? "Boo" : me.role === "hunter" ? "Radar" : me.role === "prop" ? "Distract" : null) : null;
+    this.hud.setAbility(abilityLabel, me.cooldown ?? 0);
 
     this.hud.update({
       connected: true,

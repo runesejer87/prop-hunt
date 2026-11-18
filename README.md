@@ -109,3 +109,10 @@ Two Vercel projects from this repo:
 - **Maps:** House, Office, Diner, plus the cosy Playroom, Garden and Bakery. A new map is picked each round.
 - **Roles:** in the lobby each player can pick Auto (default), Hider or Hunter. Only one player can pick Hunter. If nobody picks, the hunter changes every round (never the same player twice in a row). Players who pick Hider are skipped.
 - **Phone:** the joystick stands still when only touched and reaches full speed about two thirds of the way to the edge, and stays at full speed beyond. The layout respects the notch / Dynamic Island and home bar.
+
+## Ghosts, reveal, emotes, easy mode
+
+- **Ghosts:** a hider who is found (or someone who joins mid-round) becomes a ghost. Ghosts float through walls. Press F next to an object to rattle it (the hunter gets a decoy noise), or next to the hunter to give them a fright (it cancels an inspection). 8 second cooldown.
+- **Reveal:** at the end of a round the camera visits each hider and shows what they were and when they were found.
+- **Emotes:** keys 1-5 (wave, laugh, heart, question, party), or the smiley button on touch screens. Hiders still in the game cannot use them, since it would give them away.
+- **Settings (lobby):** Easy mode (25 s to hide, a slower hunter, smaller penalty for a wrong hit) and hunt length 2 / 3 / 4 minutes.

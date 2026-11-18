@@ -34,6 +34,10 @@ import plugSvg from "@phosphor-icons/core/assets/fill/plugs-connected-fill.svg?r
 import skullSvg from "@phosphor-icons/core/assets/fill/skull-fill.svg?raw";
 import binocularsSvg from "@phosphor-icons/core/assets/fill/binoculars-fill.svg?raw";
 import shuffleSvg from "@phosphor-icons/core/assets/fill/shuffle-fill.svg?raw";
+import waveSvg from "@phosphor-icons/core/assets/fill/hand-waving-fill.svg?raw";
+import laughSvg from "@phosphor-icons/core/assets/fill/smiley-fill.svg?raw";
+import questionSvg from "@phosphor-icons/core/assets/fill/question-fill.svg?raw";
+import partySvg from "@phosphor-icons/core/assets/fill/confetti-fill.svg?raw";
 import timerSvg from "@phosphor-icons/core/assets/fill/timer-fill.svg?raw";
 
 const SVG = {
@@ -71,6 +75,10 @@ const SVG = {
   plug: plugSvg,
   skull: skullSvg,
   binoculars: binocularsSvg,
+  wave: waveSvg,
+  laugh: laughSvg,
+  question: questionSvg,
+  party: partySvg,
   timer: timerSvg,
   shuffle: shuffleSvg,
 } as const;

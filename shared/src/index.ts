@@ -25,11 +25,26 @@ export const DISGUISED_SPEED = 55;
 export const PLAYER_SPEED = PROP_SPEED;
 
 /** How fast a player moves, given their role and whether they are disguised. */
-export function moveSpeed(role: string, disguised: boolean, running = false): number {
-  if (role === "hunter") return HUNTER_SPEED;
+export function moveSpeed(role: string, disguised: boolean, running = false, easy = false, ghost = false): number {
+  if (ghost) return GHOST_SPEED;
+  if (role === "hunter") return easy ? HUNTER_SPEED * EASY_HUNTER_FACTOR : HUNTER_SPEED;
   if (running) return CHASE_SPEED;
   return disguised ? DISGUISED_SPEED : PROP_SPEED;
 }
+
+/** Easy mode (a lobby setting, good for younger players): more time to hide, a slower hunter, gentler penalties. */
+export const EASY_HIDE_TIME = 25;
+export const EASY_HUNTER_FACTOR = 0.88;
+export const EASY_WRONG_HIT_PENALTY = 5;
+/** Hunt length choices in the lobby, in seconds. */
+export const HUNT_LENGTHS = [120, 180, 240] as const;
+
+/** Ghosts (players who have been found, or who joined mid-round) float through walls and can help the hiders. */
+export const GHOST_SPEED = 190;
+export const GHOST_COOLDOWN = 8;
+/** A ghost can rattle an object this close (pixels), or give the hunter a fright this close. */
+export const GHOST_RATTLE_RANGE = 80;
+export const GHOST_BOO_RANGE = 75;
 
 /** Abilities (key F). Props: Distract sends the hunter a fake ping. Hunter: Radar pings props nearby. */
 export const DISTRACT_COOLDOWN = 15;
@@ -74,7 +89,7 @@ export type Phase = "lobby" | "hide" | "hunt" | "end";
 export const LOBBY_COUNTDOWN = 3;
 export const HIDE_TIME = 15;
 export const HUNT_TIME = 180;
-export const END_TIME = 10;
+export const END_TIME = 14;
 
 /** Props: stand still this long while disguised to become a perfect copy (no wobble). */
 export const SETTLE_TIME = 1.0;
@@ -180,6 +195,10 @@ export const GameState = schema(
     map: t.string(),
     /** How far the hunt has tightened (0, 1 or 2). */
     alert: t.number(),
+    /** Lobby setting: easy mode for younger players. */
+    easy: t.boolean(),
+    /** Lobby setting: how long the hunt lasts, in seconds (one of HUNT_LENGTHS). */
+    huntLength: t.number(),
   },
   "GameState",
 );
@@ -268,6 +287,45 @@ export interface TauntEvent {
   y: number;
   /** Which silly sound: 0 to TAUNT_SOUNDS - 1. */
   sound: number;
+}
+
+/** Lobby: change a game setting ({ easy?: boolean, length?: number }). */
+export const MSG_SETTINGS = "settings";
+
+/** Emotes: little pictures above your head. Living hiders may not use them (it would give them away). */
+export const MSG_EMOTE = "emote";
+/** Server to everyone: someone used an emote. */
+export const MSG_EMOTED = "emoted";
+export const EMOTE_KINDS = ["wave", "laugh", "heart", "question", "party"] as const;
+export type EmoteKind = (typeof EMOTE_KINDS)[number];
+export const EMOTE_COOLDOWN = 1.2;
+export interface EmoteEvent {
+  id: string;
+  kind: EmoteKind;
+}
+
+/** Server to a hunter: a ghost gave you a fright. */
+export const MSG_BOO = "boo";
+/** Server to everyone: a ghost rattled an object here. */
+export const MSG_RATTLE = "rattle";
+export interface RattleEvent {
+  x: number;
+  y: number;
+}
+
+/** Server to everyone when a round ends: where every hider was and how it went. */
+export const MSG_RECAP = "recap";
+export interface RecapEntry {
+  id: string;
+  name: string;
+  /** What they were disguised as (name of the object), or "" if they never disguised. */
+  as: string;
+  x: number;
+  y: number;
+  /** Found by the hunter (true) or survived (false). */
+  found: boolean;
+  /** Seconds into the hunt when they were found; for survivors, how long the hunt lasted. */
+  at: number;
 }
 
 /** Lobby: add or remove a computer-controlled player. */

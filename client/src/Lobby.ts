@@ -18,6 +18,7 @@ export interface LobbyActions {
   addBot(level: "normal" | "easy"): void;
   removeBot(): void;
   logOut(): void;
+  settings(s: { easy?: boolean; length?: number }): void;
 }
 
 const COLORS = ["#4ade80", "#60a5fa", "#fbbf24", "#f472b6"];
@@ -32,6 +33,8 @@ export class Lobby {
   private easyBtn: HTMLButtonElement;
   private removeBtn: HTMLButtonElement;
   private autoBtn!: HTMLButtonElement;
+  private easyModeBtn!: HTMLButtonElement;
+  private easyOn = false;
   private hiderBtn!: HTMLButtonElement;
   private hunterBtn!: HTMLButtonElement;
   private lastKey = "";
@@ -52,6 +55,14 @@ export class Lobby {
           <button id="lb-hunter" class="ph-segbtn">${icon("search", 20)} Hunter</button>
         </div>
         <div id="lb-roletip" class="ph-help" style="text-align:center"></div>
+        <div class="ph-settings">
+          <button id="lb-easymode" class="ph-chip" title="More time to hide, a slower hunter, gentler penalties">${icon("heart", 16)} Easy mode</button>
+          <div class="ph-lens" role="group" aria-label="Hunt length">
+            <button class="ph-chip" data-len="120">2 min</button>
+            <button class="ph-chip" data-len="180">3 min</button>
+            <button class="ph-chip" data-len="240">4 min</button>
+          </div>
+        </div>
         <button id="lb-ready" class="ph-btn">Ready</button>
         <div class="ph-actions">
           <button id="lb-add" class="ph-btn ph-small">${icon("robot", 18)} CPU player</button>
@@ -74,6 +85,11 @@ export class Lobby {
     this.autoBtn.onclick = () => this.actions.role("auto");
     this.hiderBtn.onclick = () => this.actions.role("hider");
     this.hunterBtn.onclick = () => this.actions.role("hunter");
+    this.easyModeBtn = el.querySelector("#lb-easymode")!;
+    this.easyModeBtn.onclick = () => this.actions.settings({ easy: !this.easyOn });
+    el.querySelectorAll<HTMLButtonElement>("[data-len]").forEach((b) => {
+      b.onclick = () => this.actions.settings({ length: Number(b.dataset.len) });
+    });
     this.readyBtn.onclick = () => this.actions.ready(!this.myReady);
     this.addBtn.onclick = () => this.actions.addBot("normal");
     this.easyBtn.onclick = () => this.actions.addBot("easy");
@@ -85,12 +101,13 @@ export class Lobby {
   }
 
   /** Show or hide, and refresh. Cheap to call every frame: the page only changes when something did. */
-  update(visible: boolean, players: LobbyPlayer[], countdown: number) {
+  update(visible: boolean, players: LobbyPlayer[], countdown: number, settings: { easy: boolean; length: number }) {
     this.el.style.display = visible ? "flex" : "none";
     if (!visible) return;
     const me = players.find((p) => p.me);
     this.myReady = !!me?.ready;
-    const key = JSON.stringify([players, countdown]);
+    this.easyOn = settings.easy;
+    const key = JSON.stringify([players, countdown, settings]);
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -144,6 +161,8 @@ export class Lobby {
     (this.el.querySelector("#lb-roletip") as HTMLElement).textContent = takenBy
       ? `${takenBy.name} is the hunter this round.`
       : "Auto: the hunter changes every round. One hunter, everyone else hides.";
+    this.easyModeBtn.classList.toggle("ph-on", settings.easy);
+    this.el.querySelectorAll<HTMLButtonElement>("[data-len]").forEach((b) => b.classList.toggle("ph-on", Number(b.dataset.len) === settings.length));
     this.readyBtn.innerHTML = this.myReady ? "Not ready" : `${icon("check", 22)} Ready`;
     this.readyBtn.classList.toggle("ph-off", this.myReady);
     const hasBot = players.some((p) => p.bot);

@@ -33,6 +33,23 @@ import {
   MSG_ADD_BOT,
   MSG_READY,
   MSG_ROLE,
+  MSG_SETTINGS,
+  MSG_EMOTE,
+  MSG_EMOTED,
+  MSG_BOO,
+  MSG_RATTLE,
+  MSG_RECAP,
+  EMOTE_KINDS,
+  EMOTE_COOLDOWN,
+  EASY_HIDE_TIME,
+  EASY_WRONG_HIT_PENALTY,
+  HUNT_LENGTHS,
+  GHOST_COOLDOWN,
+  GHOST_RATTLE_RANGE,
+  GHOST_BOO_RANGE,
+  type EmoteKind,
+  type RecapEntry,
+  type RattleEvent,
   MSG_REMOVE_BOT,
   type AddBotMessage,
   MSG_TAUNTED,
@@ -200,6 +217,15 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       p.wantHunter = role === "hunter";
       p.wantHider = role === "hider";
     },
+    [MSG_SETTINGS]: (_client: Client, msg: { easy?: boolean; length?: number }) => {
+      if (this.state.phase !== "lobby") return;
+      if (typeof msg?.easy === "boolean") this.state.easy = msg.easy;
+      if (typeof msg?.length === "number" && (HUNT_LENGTHS as readonly number[]).includes(msg.length) && !process.env.HUNT_TIME_OVERRIDE) {
+        this.state.huntLength = msg.length;
+        this.huntTime = msg.length;
+      }
+    },
+    [MSG_EMOTE]: (client: Client, msg: { kind?: string }) => this.doEmote(client.sessionId, msg?.kind),
     [MSG_READY]: (client: Client, msg: { ready?: boolean }) => {
       const p = this.state.players.get(client.sessionId);
       if (p && this.state.phase === "lobby") p.ready = msg?.ready ?? !p.ready;
@@ -226,8 +252,66 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (body.disguise !== prop.type || body.rot !== prop.rot) this.stillFor.set(id, 0);
       body.disguise = prop.type;
       body.rot = prop.rot;
+      this.lastDisguise.set(id, prop.type);
       this.puffClue(body);
     }
+  }
+
+  /** A ghost is a player who has been found, or who joined mid-round: they watch, float through walls and can help. */
+  private isGhost(p: PlayerState): boolean {
+    return p.role === "spectator" || (p.role === "prop" && !p.alive);
+  }
+
+  private emoteReadyAt = new Map<string, number>();
+  /** For the round recap: what each hider last copied, and when they were found. */
+  private lastDisguise = new Map<string, string>();
+  private foundAt = new Map<string, { t: number; x: number; y: number }>();
+
+  private doEmote(id: string, kind: unknown) {
+    const p = this.state.players.get(id);
+    if (!p || !(EMOTE_KINDS as readonly string[]).includes(String(kind))) return;
+    const phase = this.state.phase;
+    // A hider still in the game must stay quiet: an emote would give away where they are.
+    if ((phase === "hide" || phase === "hunt") && p.role === "prop" && p.alive) return;
+    const now = this.clock.currentTime / 1000;
+    if (now < (this.emoteReadyAt.get(id) ?? 0)) return;
+    this.emoteReadyAt.set(id, now + EMOTE_COOLDOWN);
+    const ghost = this.isGhost(p);
+    for (const c of this.clients) {
+      const me = this.state.players.get(c.sessionId);
+      if (ghost && me?.role === "hunter" && phase !== "end") continue; // the hunter cannot see ghosts
+      c.send(MSG_EMOTED, { id, kind: kind as EmoteKind });
+    }
+  }
+
+  /** A ghost helps the hiders: give the hunter a fright up close, or rattle an object to send them the wrong way. */
+  private ghostAbility(id: string, player: PlayerState, body: BodyState) {
+    const hunterId = this.hunterId();
+    const hb = hunterId ? this.state.bodies.get(hunterId) : undefined;
+    if (hunterId && hb && Math.hypot(hb.x - body.x, hb.y - body.y) < GHOST_BOO_RANGE) {
+      this.sendTo(hunterId, MSG_BOO, {});
+      this.cancelInspect(false); // a good scare ruins an inspection
+      this.setCooldown(id, GHOST_COOLDOWN);
+      return;
+    }
+    let best: { x: number; y: number; d: number } | undefined;
+    for (const p of this.map.props) {
+      const d = this.boxDist(body.x, body.y, p.x, p.y, p.type, p.rot);
+      if (d <= GHOST_RATTLE_RANGE && (!best || d < best.d)) best = { x: p.x, y: p.y, d };
+    }
+    if (!best) return;
+    this.broadcast(MSG_RATTLE, { x: best.x, y: best.y } satisfies RattleEvent);
+    if (hunterId) {
+      const j = () => (Math.random() * 2 - 1) * 30;
+      this.sendTo(hunterId, MSG_PING, { x: best.x + j(), y: best.y + j(), kind: "noise" } satisfies PingEvent);
+    }
+    this.setCooldown(id, GHOST_COOLDOWN);
+    void player;
+  }
+
+  private boxDist(x: number, y: number, px: number, py: number, type: string, rot: number): number {
+    const f = footprint(type, rot);
+    return Math.hypot(Math.max(Math.abs(x - px) - f.w / 2, 0), Math.max(Math.abs(y - py) - f.h / 2, 0));
   }
 
   private doRotate(id: string) {
@@ -265,6 +349,8 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.timeLeft = 0;
     this.state.winner = "";
     this.state.round = 0;
+    this.state.easy = false;
+    this.state.huntLength = this.huntTime;
     // Send updates as often as the game steps, so movement on screen is even.
     this.setPatchRate(1000 / TICK_RATE);
     // A slow tick must not make everyone jump: cap how much time one step covers.
@@ -287,6 +373,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     player.score = 0;
     player.gain = 0;
     player.ready = false;
+    player.cooldown = 0;
     player.wantHunter = false;
     player.wantHider = false;
     player.hp = HUNTER_MAX_HP;
@@ -523,7 +610,9 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.state.alert = 0;
     for (const p of all) this.setCooldown(p.id, 0);
     this.state.winner = "";
-    this.setPhase("hide", HIDE_TIME);
+    this.lastDisguise.clear();
+    this.foundAt.clear();
+    this.setPhase("hide", this.state.easy ? EASY_HIDE_TIME : HIDE_TIME);
   }
 
   /** A different map each round (the first round can be any of them). */
@@ -549,6 +638,18 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       p.score += gain;
     }
     this.state.winner = winner;
+    // Tell everyone where each hider was and how it went (the "reveal").
+    const huntSeconds = Math.round(this.huntTime - Math.max(0, this.clockLeft));
+    const recap: RecapEntry[] = [];
+    for (const p of all) {
+      if (p.role !== "prop") continue;
+      const b = this.state.bodies.get(p.id);
+      if (!b) continue;
+      const type = this.lastDisguise.get(p.id) ?? "";
+      const f = this.foundAt.get(p.id);
+      recap.push({ id: p.id, name: p.name, as: PROP_TYPES[type]?.name ?? "", x: !p.alive && f ? f.x : b.x, y: !p.alive && f ? f.y : b.y, found: !p.alive, at: p.alive ? huntSeconds : (f?.t ?? huntSeconds) });
+    }
+    this.broadcast(MSG_RECAP, recap);
     this.setPhase("end", END_TIME);
   }
 
@@ -671,6 +772,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     this.chasing.delete(id);
     found.chase = 0;
     found.alive = false;
+    this.foundAt.set(id, { t: Math.round(this.huntTime - Math.max(0, this.clockLeft)), x: body.x, y: body.y });
     this.clearDisguise(id, body);
   }
 
@@ -695,7 +797,7 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
         return;
       }
     } else if (hit?.kind === "prop") {
-      hunter.hp = Math.max(0, hunter.hp - WRONG_HIT_PENALTY);
+      hunter.hp = Math.max(0, hunter.hp - (this.state.easy ? EASY_WRONG_HIT_PENALTY : WRONG_HIT_PENALTY));
       result = "prop";
     }
     this.broadcast(MSG_SWING, { x, y, result } satisfies SwingEvent);
@@ -935,8 +1037,15 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       if (!input || !moving) return;
       // Diagonals are no faster; a half-pushed joystick is half speed.
       const len = Math.hypot(input.dx, input.dy);
-      const step = moveSpeed(player.role, !!body.disguise, this.chasing.has(id)) * dt * Math.min(1, len);
+      const ghost = this.isGhost(player);
+      const step = moveSpeed(player.role, !!body.disguise, this.chasing.has(id), this.state.easy, ghost) * dt * Math.min(1, len);
       this.facing.set(id, { x: input.dx / len, y: input.dy / len });
+      if (ghost) {
+        // Ghosts float through everything (but stay on the map).
+        body.x = clamp(body.x + (input.dx / len) * step, 8, this.map.width - 8);
+        body.y = clamp(body.y + (input.dy / len) * step, 8, this.map.height - 8);
+        return;
+      }
       // Players disguised as objects are solid, just like the real thing.
       const solid = (px: number, py: number, r: number) => {
         let hit = false;
@@ -1001,8 +1110,10 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     if (this.state.phase !== "hunt") return;
     const player = this.state.players.get(id);
     const body = this.state.bodies.get(id);
-    if (!player || !body || !player.alive) return;
+    if (!player || !body) return;
     if ((this.cooldowns.get(id) ?? 0) > 0) return;
+    if (this.isGhost(player)) return this.ghostAbility(id, player, body);
+    if (!player.alive) return;
 
     if (player.role === "prop") {
       const hunter = this.hunterId();

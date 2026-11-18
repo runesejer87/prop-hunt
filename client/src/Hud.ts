@@ -210,7 +210,7 @@ export class Hud {
   /** A short message in the top left corner. */
   toast(message: string) {
     const { height } = this.scene.scale;
-    this.toastText.setText(message).setWordWrapWidth(Math.max(200, this.scene.scale.width - 48)).setPosition(Math.max(26, getInsets().left + 14), this.touchMode ? height - getInsets().bottom - 78 : getInsets().top + 24).setAlpha(1).setVisible(true);
+    this.toastText.setText(message).setWordWrapWidth(Math.max(200, Math.min(this.scene.scale.width - 48, 300))).setPosition(Math.max(26, getInsets().left + 14), this.touchMode ? height - getInsets().bottom - 78 : getInsets().top + 24).setAlpha(1).setVisible(true);
     this.toastBg.clear().setAlpha(1);
     const b = this.toastText.getBounds();
     panel(this.toastBg, b.x - 14, b.y - 8, b.width + 28, b.height + 16, 14, 0.85);
@@ -283,15 +283,18 @@ export class Hud {
         hint = isHunter ? "Space: swing   M: sound" : "WASD: move   E: become   Q: change back   R: turn   Hold still to blend in   M: sound";
         break;
       case "hunt":
-        title = info.role === "spectator" || !info.alive ? "Spectating" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
+        title = info.role === "spectator" || !info.alive ? "You're a ghost" : isHunter ? "FIND THE PROPS" : "STAY HIDDEN";
         sub = `${mmss}  ·  ${info.propsLeft} prop${info.propsLeft === 1 ? "" : "s"} left  ·  ${info.mapName ?? ""}${info.alert ? `  ·  Alert ${info.alert}` : ""}`;
-        hint = isHunter
-          ? "WASD: steer   Space: swing   Hold E: inspect (safe)   F: radar   Tab: scores"
+        hint = info.role === "spectator" || !info.alive
+          ? "WASD: float through walls   F: rattle an object or scare the hunter   1-5: emotes   Tab: scores"
+          : isHunter
+          ? "WASD: steer   Space: swing   Hold E: inspect (safe)   F: radar   1-5: emotes   Tab: scores"
           : "Don't run! E / Q / R, then hold still   F: fake noise   Space: taunt (gives you away!)   Tab: scores";
         break;
       case "end":
         title = "Round over";
-        sub = "Next round starting soon…";
+        sub = "Here is where everyone hid…";
+        hint = "1-5: emotes   Tab: scores";
         break;
     }
     this.title.setText(title).setVisible(title !== "");
