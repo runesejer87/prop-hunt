@@ -1,5 +1,6 @@
 import {
   PROP_TYPES,
+  PLAYER_RADIUS,
   footprint,
   type BodyState,
   type GameMap,
@@ -29,6 +30,8 @@ export interface BotApi {
   inspect(id: string, on: boolean): void;
   /** Ids of props the hunter can see right now (in range and line of sight), the same rule a human hunter gets. */
   visibleTo(hunterId: string): string[];
+  /** Boxes of players disguised as objects (they are solid). */
+  solids(exceptId: string): { x: number; y: number; w: number; h: number }[];
 }
 
 export type BotLevel = "easy" | "normal";
@@ -114,8 +117,17 @@ export class BotBrain {
     return LEVEL[this.level];
   }
 
+  /** Where a player cannot stand because another player is disguised there. */
+  private solidFn(): ((x: number, y: number) => boolean) | undefined {
+    const rects = this.api.solids(this.id);
+    if (rects.length === 0) return undefined;
+    const m = PLAYER_RADIUS + 3;
+    return (x, y) => rects.some((r) => Math.abs(x - r.x) < r.w / 2 + m && Math.abs(y - r.y) < r.h / 2 + m);
+  }
+
   /** New round (or new role): forget everything. */
   reset() {
+    this.sent = { x: 99, y: 99 };
     this.nav = navFor(this.api.map);
     this.navMapId = this.api.map.id;
     this.path = [];
@@ -245,13 +257,14 @@ export class BotBrain {
     }
     const now = this.api.now();
     const d = Math.hypot(aim.x - me.x, aim.y - me.y);
-    if (d < 110 && this.nav.lineClear(me, aim)) {
+    const solid = this.solidFn();
+    if (d < 110 && this.nav.lineClear(me, aim, solid)) {
       this.setDir(me, aim);
       return false;
     }
     const aimMoved = Math.hypot(aim.x - this.pathAim.x, aim.y - this.pathAim.y) > 50;
     if (this.path.length === 0 || now - this.pathAt > 0.7 || aimMoved) {
-      this.path = this.nav.path(me.x, me.y, arrived) ?? [];
+      this.path = this.nav.path(me.x, me.y, arrived, 9000, solid) ?? [];
       this.pathIdx = 0;
       this.pathAt = now;
       this.pathAim = { ...aim };
@@ -297,7 +310,7 @@ export class BotBrain {
       case "flee": {
         if (!hb) return this.stop();
         if (this.path.length === 0 || now - this.pathAt > 0.8) {
-          this.path = this.nav.fleePath(me.x, me.y, hb) ?? [];
+          this.path = this.nav.fleePath(me.x, me.y, hb, 34, this.solidFn()) ?? [];
           this.pathIdx = 0;
           this.pathAt = now;
         }
@@ -310,7 +323,7 @@ export class BotBrain {
           return;
         }
         if (this.path.length === 0 || now - this.pathAt > 1) {
-          this.path = this.nav.fleePath(me.x, me.y, hb, 30) ?? [];
+          this.path = this.nav.fleePath(me.x, me.y, hb, 30, this.solidFn()) ?? [];
           this.pathIdx = 0;
           this.pathAt = now;
         }
@@ -417,8 +430,20 @@ export class BotBrain {
     return scored.slice(0, 5)[Math.floor(Math.random() * Math.min(5, scored.length))]?.p ?? null;
   }
 
-  /** Somewhere in the same area, away from the object we copied, where lookalikes are close by. */
+  /**
+   * Somewhere to blend in: right next to another object of the same kind (so we look like part of a set),
+   * but not on top of the one we copied. Falls back to a nearby spot.
+   */
   private pickShuffleSpot(me: BodyState): Point | null {
+    const type = me.disguise;
+    const mates = this.api.map.props
+      .filter((p) => p.type === type && !p.stacked && Math.hypot(p.x - me.x, p.y - me.y) > 40 && Math.hypot(p.x - me.x, p.y - me.y) < 320)
+      .sort(() => Math.random() - 0.5);
+    for (const m of mates.slice(0, 4)) {
+      const f = footprint(m.type, m.rot);
+      const spot = this.nav.randomNear(m.x, m.y, Math.max(f.w, f.h) / 2 + 22, Math.max(f.w, f.h) / 2 + 46);
+      if (spot) return spot;
+    }
     return this.nav.randomNear(me.x, me.y, 70, 150) ?? null;
   }
 
@@ -431,8 +456,13 @@ export class BotBrain {
     this.visible = this.api.visibleTo(this.id);
   }
 
+  private dbgState = "";
   private updateHunter(dt: number, me: BodyState, pl: PlayerState, phase: string) {
     void dt;
+    if (process.env.BOT_DEBUG && this.dbgState !== this.hstate) {
+      this.dbgState = this.hstate;
+      console.log(`[bot ${this.api.now().toFixed(1)}s] hunter ${this.hstate} at ${Math.round(me.x)},${Math.round(me.y)} stuck=${this.stuck}`);
+    }
     const now = this.api.now();
     if (phase !== "hunt") return this.stop();
     if (pl.inspect > 0) return this.stop();
@@ -473,7 +503,9 @@ export class BotBrain {
       if (!b || !this.api.player(this.susId)?.alive) {
         this.hstate = "patrol";
       } else {
-        const arrived = this.walk(me, b, (x, y) => Math.hypot(x - b.x, y - b.y) < 34);
+        // Disguised players are solid, so "arrived" means close to the edge of the object, not its middle.
+        const fp = b.disguise ? footprint(b.disguise, b.rot) : { w: 24, h: 24 };
+        const arrived = this.walk(me, b, (x, y) => Math.hypot(Math.max(Math.abs(x - b.x) - fp.w / 2, 0), Math.max(Math.abs(y - b.y) - fp.h / 2, 0)) < 24);
         if (arrived) {
           this.api.inspect(this.id, true);
           this.inspectProp = null;

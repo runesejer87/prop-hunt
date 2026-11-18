@@ -148,6 +148,17 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
     attack: (id) => this.handleAttack(id, { x: 0, y: 0 }),
     inspect: (id, on) => this.doInspect(id, on),
     visibleTo: (hunterId) => this.visibleProps(hunterId),
+    solids: (exceptId) => {
+      // Players disguised as objects are solid, so CPU players must walk around them.
+      const out: { x: number; y: number; w: number; h: number }[] = [];
+      this.state.bodies.forEach((b, id) => {
+        const p = this.state.players.get(id);
+        if (id === exceptId || !b.disguise || !p || p.role !== "prop" || !p.alive) return;
+        const f = footprint(b.disguise, b.rot);
+        out.push({ x: b.x, y: b.y, w: f.w, h: f.h });
+      });
+      return out;
+    },
   };
   /** Time (seconds, room clock) before which a prop that just escaped cannot disguise. */
   private lockUntil = new Map<string, number>();
