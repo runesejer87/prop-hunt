@@ -1,6 +1,7 @@
 import { Client, type Room } from "@colyseus/sdk";
 import { ROOM_NAME, SERVER_PORT, MAX_NAME_LENGTH, GameState } from "@prop-hunt/shared";
 import { isTouchDevice } from "./Touch.ts";
+import { icon, type IconName } from "./icons.ts";
 
 const PASSWORD_KEY = "prop-hunt-password";
 const NAME_KEY = "prop-hunt-name";
@@ -38,9 +39,9 @@ function titleScreen(firstMessage: string, needPassword: boolean): Promise<Room<
     const gate = document.createElement("div");
     gate.id = "gate";
     gate.className = "ph-screen";
-    const keys = isTouchDevice()
-      ? ["Left thumb: move", "Right buttons: act", "Hold still to blend in"]
-      : ["WASD move", "E become object", "Q change back", "R turn", "Hold still to blend in"];
+    const keys: [IconName, string][] = isTouchDevice()
+      ? [["move", "Left thumb moves"], ["cube", "Right buttons act"], ["blend", "Hold still to blend in"]]
+      : [["move", "WASD move"], ["cube", "E become object"], ["undo", "Q change back"], ["turn", "R turn"], ["blend", "Hold still"]];
     gate.innerHTML = `
       <form class="ph-gate">
         <img class="ph-logo" src="/icon.svg" alt="" />
@@ -50,10 +51,10 @@ function titleScreen(firstMessage: string, needPassword: boolean): Promise<Room<
           <div id="gate-msg" class="ph-msg"></div>
           <input id="gate-name" class="ph-input" maxlength="${MAX_NAME_LENGTH}" autocomplete="nickname" placeholder="Your name" />
           <input id="gate-pw" class="ph-input" type="password" autocomplete="current-password" placeholder="Password" style="display:${needPassword ? "block" : "none"}" />
-          <button id="gate-go" class="ph-btn" type="submit">Play</button>
+          <button id="gate-go" class="ph-btn" type="submit">${icon("play", 20)} Play</button>
         </div>
-        <div class="ph-help">2–4 players</div>
-        <div class="ph-keys">${keys.map((k) => `<span class="ph-key">${k}</span>`).join("")}</div>
+        <div class="ph-help">${icon("users", 16)} 2–4 players</div>
+        <div class="ph-keys">${keys.map(([i, k]) => `<span class="ph-key">${icon(i, 14)} ${k}</span>`).join("")}</div>
       </form>`;
     document.body.appendChild(gate);
     const form = gate.querySelector("form")!;

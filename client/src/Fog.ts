@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import { VISION_RADIUS, Sight, type GameMap } from "@prop-hunt/shared";
 
+const SHADE = "rgba(34, 18, 40, 0.9)"; // a warm dusk, not pitch black
+const SHADE_HEX = 0x221228;
+const SHADE_ALPHA = 0.9;
 const FADE = 60; // width of the soft edge, pixels; it is fully dark at VISION_RADIUS
 const HALF = VISION_RADIUS;
 const SIZE = HALF * 2;
@@ -26,9 +29,9 @@ export class Fog {
     this.canvasTex = scene.textures.createCanvas("fog_view", SIZE, SIZE)!;
     this.ctx = this.canvasTex.getContext();
     this.image = scene.add.image(0, 0, "fog_view").setDepth(50).setVisible(false);
-    this.rects = [0, 1, 2, 3].map(() => scene.add.rectangle(0, 0, 1, 1, 0x000000, 1).setOrigin(0).setDepth(50).setVisible(false));
+    this.rects = [0, 1, 2, 3].map(() => scene.add.rectangle(0, 0, 1, 1, SHADE_HEX, SHADE_ALPHA).setOrigin(0).setDepth(50).setVisible(false));
     // Total darkness (hunter waiting while props hide). Sits on screen, not in the world.
-    this.blackout = scene.add.rectangle(0, 0, 1, 1, 0x000000, 1).setOrigin(0).setScrollFactor(0).setDepth(50).setVisible(false);
+    this.blackout = scene.add.rectangle(0, 0, 1, 1, SHADE_HEX, 0.96).setOrigin(0).setScrollFactor(0).setDepth(50).setVisible(false);
   }
 
   /** Tell the fog how big the world is (it changes with the map). */
@@ -58,7 +61,7 @@ export class Fog {
     const ctx = this.ctx;
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, SIZE, SIZE);
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = SHADE;
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     // Erase the lit area. The gradient makes it fade out toward the edge of the circle.

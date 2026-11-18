@@ -1,4 +1,5 @@
 import { MAX_PLAYERS, MIN_PLAYERS } from "@prop-hunt/shared";
+import { icon } from "./icons.ts";
 
 export interface LobbyPlayer {
   name: string;
@@ -35,16 +36,16 @@ export class Lobby {
     el.className = "ph-lobby";
     el.innerHTML = `
       <div class="ph-card">
-        <div class="ph-head"><h2>Lobby</h2><div id="lb-count" class="ph-count"></div></div>
+        <div class="ph-head"><h2>${icon("users", 26)} Lobby</h2><div id="lb-count" class="ph-count"></div></div>
         <div id="lb-list" class="ph-list"></div>
         <div id="lb-status" class="ph-status"></div>
         <button id="lb-ready" class="ph-btn">Ready</button>
         <div class="ph-actions">
-          <button id="lb-add" class="ph-btn ph-small">+ CPU player</button>
-          <button id="lb-easy" class="ph-btn ph-small">+ Easy CPU</button>
-          <button id="lb-remove" class="ph-btn ph-small ph-danger" style="flex:none">− CPU</button>
+          <button id="lb-add" class="ph-btn ph-small">${icon("robot", 18)} CPU player</button>
+          <button id="lb-easy" class="ph-btn ph-small">${icon("plus", 18)} Easy CPU</button>
+          <button id="lb-remove" class="ph-btn ph-small ph-danger" style="flex:none">${icon("minus", 18)} CPU</button>
         </div>
-        <div class="ph-foot"><span>Share the link with friends</span><a id="lb-out" href="#">Log out</a></div>
+        <div class="ph-foot"><span>${icon("link", 14)} Share the link with friends</span><a id="lb-out" href="#">${icon("logout", 14)} Log out</a></div>
       </div>`;
     document.body.appendChild(el);
     this.el = el;
@@ -81,7 +82,8 @@ export class Lobby {
       const av = document.createElement("span");
       av.className = "ph-avatar";
       av.style.background = COLORS[i % COLORS.length]!;
-      av.textContent = p.bot ? "🤖" : (p.name.trim()[0] ?? "?").toUpperCase();
+      if (p.bot) av.innerHTML = icon("robot", 20);
+      else av.textContent = (p.name.trim()[0] ?? "?").toUpperCase();
       const name = document.createElement("span");
       name.className = "ph-name";
       name.textContent = p.name;
@@ -95,7 +97,7 @@ export class Lobby {
       score.textContent = p.score ? `${p.score} pts` : "";
       const badge = document.createElement("span");
       badge.className = "ph-badge";
-      badge.textContent = p.ready ? "Ready" : "Not ready";
+      badge.innerHTML = p.ready ? `${icon("check", 14)} Ready` : "Not ready";
       row.append(av, name, score, badge);
       this.list.appendChild(row);
     });
@@ -105,14 +107,14 @@ export class Lobby {
       row.textContent = "Waiting for a player…";
       this.list.appendChild(row);
     }
-    (this.el.querySelector("#lb-count") as HTMLElement).textContent = `${players.length}/${MAX_PLAYERS} players`;
+    (this.el.querySelector("#lb-count") as HTMLElement).innerHTML = `${icon("user", 15)} ${players.length}/${MAX_PLAYERS}`;
 
     const everyoneReady = players.length >= MIN_PLAYERS && players.every((p) => p.ready);
     if (players.length < MIN_PLAYERS) this.status.textContent = "Need at least 2 players. Invite a friend or add a CPU.";
     else if (everyoneReady) this.status.innerHTML = `Starting in <b>${countdown}</b>`;
     else this.status.textContent = `Waiting for ${players.filter((p) => !p.ready).map((p) => p.name).join(", ")}`;
 
-    this.readyBtn.textContent = this.myReady ? "Not ready" : "Ready";
+    this.readyBtn.innerHTML = this.myReady ? "Not ready" : `${icon("check", 22)} Ready`;
     this.readyBtn.classList.toggle("ph-off", this.myReady);
     const hasBot = players.some((p) => p.bot);
     const full = players.length >= MAX_PLAYERS;

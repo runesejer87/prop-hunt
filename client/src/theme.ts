@@ -3,7 +3,7 @@ export const FONT_DISPLAY = '"Fredoka Variable", "Fredoka", "Trebuchet MS", sans
 export const FONT_BODY = '"Nunito Variable", "Nunito", "Segoe UI", sans-serif';
 
 export const COLOR = {
-  panel: 0x10131a,
+  panel: 0x1e1524,
   panelEdge: 0xffffff,
   green: 0x4ade80,
   yellow: 0xfacc15,

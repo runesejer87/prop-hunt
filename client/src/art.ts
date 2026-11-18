@@ -145,7 +145,7 @@ export function drawWorld(scene: Phaser.Scene, map: GameMap) {
   });
 
   // Dark backdrop behind everything (the area outside the walls).
-  scene.add.graphics().setDepth(-1).fillStyle(0x15171c).fillRect(0, 0, map.width, map.height);
+  scene.add.graphics().setDepth(-1).fillStyle(0x2a1d2c).fillRect(0, 0, map.width, map.height);
 
   const g = scene.add.graphics().setDepth(0.5);
 
@@ -728,7 +728,7 @@ export function makeLightTextures(scene: Phaser.Scene) {
     const ctx = vig.getContext();
     const grad = ctx.createRadialGradient(128, 128, 70, 128, 128, 182);
     grad.addColorStop(0, "rgba(0,0,0,0)");
-    grad.addColorStop(1, "rgba(5,6,12,0.7)");
+    grad.addColorStop(1, "rgba(46,22,34,0.38)");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 256, 256);
     vig.refresh();
@@ -751,8 +751,32 @@ export function placeLights(scene: Phaser.Scene, map: GameMap) {
     });
   };
   for (const p of map.props) {
-    if (p.type === "lamp") add(p.x, p.y, 0xffc66b, 190, 0.42);
+    if (p.type === "lamp") add(p.x, p.y, 0xffc66b, 240, 0.55);
     else if (p.type === "tv_stand") add(p.x, p.y + 30, 0x7fb4ff, 220, 0.28);
     else if (p.type === "desk") add(p.x, p.y - 4, 0x8fc4ff, 80, 0.2);
+  }
+}
+
+/** Little warm lights that drift around the rooms, like fireflies. Purely for the cosy feel. */
+export function placeFireflies(scene: Phaser.Scene, map: GameMap) {
+  const count = Math.round((map.width * map.height) / 60000);
+  for (let i = 0; i < count; i++) {
+    const img = scene.add.image(Math.random() * map.width, Math.random() * map.height, "glow").setTint(0xffe08a).setBlendMode(Phaser.BlendModes.ADD).setDepth(2.7).setAlpha(0);
+    img.setDisplaySize(16, 16);
+    const drift = () => {
+      if (!img.scene) return;
+      scene.tweens.add({
+        targets: img,
+        x: img.x + (Math.random() - 0.5) * 140,
+        y: img.y + (Math.random() - 0.5) * 140,
+        alpha: { from: 0, to: 0.55 },
+        duration: 2600 + Math.random() * 2400,
+        yoyo: true,
+        ease: "Sine.easeInOut",
+        onYoyo: () => undefined,
+        onComplete: drift,
+      });
+    };
+    scene.time.delayedCall(Math.random() * 3000, drift);
   }
 }

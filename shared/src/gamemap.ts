@@ -116,11 +116,21 @@ export class GameMap {
    * Move from (x, y) by (dx, dy) pixels, sliding along walls and props.
    * Used by the server and by the client's own-movement prediction.
    */
-  moveWithCollision(x: number, y: number, dx: number, dy: number, radius: number): { x: number; y: number } {
+  moveWithCollision(
+    x: number,
+    y: number,
+    dx: number,
+    dy: number,
+    radius: number,
+    /** Extra things that block, e.g. players disguised as objects. Whoever already stands inside one may still walk out. */
+    extra?: (x: number, y: number, r: number) => boolean,
+  ): { x: number; y: number } {
+    const stuck = extra ? extra(x, y, radius) : false;
+    const blocked = (px: number, py: number) => this.isBlocked(px, py, radius) || (!!extra && !stuck && extra(px, py, radius));
     let nx = x;
     let ny = y;
-    if (!this.isBlocked(x + dx, y, radius)) nx = x + dx;
-    if (!this.isBlocked(nx, y + dy, radius)) ny = y + dy;
+    if (!blocked(x + dx, y)) nx = x + dx;
+    if (!blocked(nx, y + dy)) ny = y + dy;
     return { x: nx, y: ny };
   }
 

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
+import { addIconTextures, type IconName } from "./icons.ts";
 
 /** What the on-screen buttons can do. The scene supplies these. */
 export interface TouchActions {
@@ -32,6 +33,7 @@ interface Btn {
   circle: Phaser.GameObjects.Arc;
   text: Phaser.GameObjects.Text;
   sub: Phaser.GameObjects.Text;
+  img: Phaser.GameObjects.Image;
   radius: number;
   /** Which finger is holding it, if any. */
   holder: number | null;
@@ -64,6 +66,7 @@ export class TouchControls {
     private actions: TouchActions,
   ) {
     const d = 110;
+    addIconTextures(scene);
     this.base = scene.add.circle(0, 0, STICK_RADIUS, 0xffffff, 0.1).setStrokeStyle(3, 0xffffff, 0.3).setScrollFactor(0).setDepth(d).setVisible(false);
     this.thumb = scene.add.circle(0, 0, 26, 0xffffff, 0.35).setStrokeStyle(2, 0xffffff, 0.6).setScrollFactor(0).setDepth(d + 1).setVisible(false);
 
@@ -83,7 +86,8 @@ export class TouchControls {
         .setScrollFactor(0)
         .setDepth(d + 1)
         .setVisible(false);
-      this.buttons.set(key, { color, circle, text, sub, radius: 40, holder: null });
+      const img = scene.add.image(0, 0, "ic_check").setScrollFactor(0).setDepth(d + 1).setVisible(false);
+      this.buttons.set(key, { color, circle, text, sub, img, radius: 40, holder: null });
     }
 
     scene.input.addPointer(3); // joystick + two buttons at once
@@ -197,10 +201,19 @@ export class TouchControls {
 
   // --------------------------------------------------------------- layout
 
-  private place(key: Key, x: number, y: number, r: number, label: string, sub: string, show: boolean) {
+  private place(key: Key, x: number, y: number, r: number, label: string, sub: string, show: boolean, icon?: IconName) {
     const b = this.buttons.get(key)!;
     b.radius = r;
     b.circle.setRadius(Math.max(r, 1)).setPosition(x, y).setVisible(show);
+    if (icon && show) {
+      // An icon with its name under it.
+      const size = r * (sub ? 0.95 : 1.15);
+      b.img.setTexture(`ic_${icon}`).setPosition(x, y - (sub ? r * 0.2 : 0)).setDisplaySize(size, size).setTint(0xffffff).setVisible(true);
+      b.text.setVisible(false);
+      b.sub.setText(sub).setPosition(x, y + r * 0.34).setFontSize(`${Math.max(9, Math.round(r * 0.27))}px`).setVisible(sub !== "");
+      return;
+    }
+    b.img.setVisible(false);
     b.text.setText(label).setPosition(x, y - (sub ? r * 0.18 : 0)).setFontSize(`${Math.max(8, Math.round(r * (label.length > 2 ? 0.36 : 0.55)))}px`).setVisible(show);
     b.sub.setText(sub).setPosition(x, y + r * 0.18).setFontSize(`${Math.max(8, Math.round(r * 0.26))}px`).setVisible(show && sub !== "");
   }
@@ -227,25 +240,26 @@ export class TouchControls {
     const cd = ability?.cooldown ?? 0;
     const abilityOn = !!ability;
     const abilityLabel = cd > 0 ? `${cd}` : "F";
-    const abilitySub = cd > 0 ? "" : (ability?.label ?? "");
+    const abilitySub = ability?.label ?? "";
+    const abilityIcon: IconName | undefined = cd > 0 ? undefined : mode === "hunter" ? "radar" : "megaphone";
 
     if (mode === "prop") {
-      this.place("main", cx, cy, R, "E", "Become", true);
-      this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.68, "Q", "Undo", true);
-      this.place("b", cx - R * 0.3, cy - R * 2.15, R * 0.68, "R", "Turn", true);
-      this.place("ability", cx - R * 1.7, cy - R * 1.7, R * 0.7, abilityLabel, abilitySub, abilityOn);
-      this.place("taunt", cx - R * 3.7, cy + R * 0.3, R * 0.62, "Taunt", "", true);
+      this.place("main", cx, cy, R, "E", "Become", true, "cube");
+      this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.68, "Q", "Undo", true, "undo");
+      this.place("b", cx - R * 0.3, cy - R * 2.15, R * 0.68, "R", "Turn", true, "turn");
+      this.place("ability", cx - R * 1.7, cy - R * 1.7, R * 0.7, abilityLabel, cd > 0 ? "" : abilitySub, abilityOn, abilityIcon);
+      this.place("taunt", cx - R * 3.7, cy + R * 0.3, R * 0.62, "Taunt", "Taunt", true, "music");
     } else if (mode === "hunter") {
-      this.place("main", cx, cy, R, "Swing", "", true);
-      this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.8, "Inspect", "hold", true);
+      this.place("main", cx, cy, R, "Swing", "Swing", true, "fist");
+      this.place("a", cx - R * 2.15, cy + R * 0.3, R * 0.8, "Inspect", "Inspect", true, "search");
       this.place("b", 0, 0, 0, "", "", false);
       this.place("taunt", 0, 0, 0, "", "", false);
-      this.place("ability", cx - R * 0.3, cy - R * 2.15, R * 0.72, abilityLabel, abilitySub, abilityOn);
+      this.place("ability", cx - R * 0.3, cy - R * 2.15, R * 0.72, abilityLabel, cd > 0 ? "" : abilitySub, abilityOn, abilityIcon);
     } else {
       for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
-    this.place("scores", width - 30 * k, 92 * k, 17 * k, "≡", "", true);
-    this.place("mute", width - 30 * k, 92 * k + 42 * k, 15 * k, "♪", "", true);
+    this.place("scores", width - 30 * k, 92 * k, 17 * k, "≡", "", true, "scores");
+    this.place("mute", width - 30 * k, 92 * k + 42 * k, 15 * k, "♪", "", true, "sound");
   }
 
   destroy() {

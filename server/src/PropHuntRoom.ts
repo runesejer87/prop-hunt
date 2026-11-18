@@ -888,12 +888,24 @@ export class PropHuntRoom extends Room<{ state: GameState }> {
       const len = Math.hypot(input.dx, input.dy);
       const step = moveSpeed(player.role, !!body.disguise, this.chasing.has(id)) * dt * Math.min(1, len);
       this.facing.set(id, { x: input.dx / len, y: input.dy / len });
+      // Players disguised as objects are solid, just like the real thing.
+      const solid = (px: number, py: number, r: number) => {
+        let hit = false;
+        this.state.bodies.forEach((other, oid) => {
+          if (hit || oid === id || !other.disguise) return;
+          const op = this.state.players.get(oid);
+          if (!op || op.role !== "prop" || !op.alive) return;
+          const fp = footprint(other.disguise, other.rot);
+          if (Math.abs(px - other.x) < fp.w / 2 + r && Math.abs(py - other.y) < fp.h / 2 + r) hit = true;
+        });
+        return hit;
+      };
       // Walk in small pieces so a long step can never pass through a wall.
       const pieces = Math.max(1, Math.ceil(step / 6));
       let x = body.x;
       let y = body.y;
       for (let i = 0; i < pieces; i++) {
-        const n = this.map.moveWithCollision(x, y, ((input.dx / len) * step) / pieces, ((input.dy / len) * step) / pieces, PLAYER_RADIUS);
+        const n = this.map.moveWithCollision(x, y, ((input.dx / len) * step) / pieces, ((input.dy / len) * step) / pieces, PLAYER_RADIUS, solid);
         x = n.x;
         y = n.y;
       }

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { HUNTER_MAX_HP } from "@prop-hunt/shared";
 import { COLOR, CSS, FONT_BODY, FONT_DISPLAY } from "./theme.ts";
+import { addIconTextures, type IconName } from "./icons.ts";
 
 export interface BoardRow {
   name: string;
@@ -37,12 +38,22 @@ export class Hud {
   private abilityText: Phaser.GameObjects.Text;
   private warning: Phaser.GameObjects.Text;
   private touchMode = false;
+  private abilityName: IconName = "radar";
+  private abilityReady = true;
+  private titleIcon: Phaser.GameObjects.Image;
+  private hpIcon: Phaser.GameObjects.Image;
+  private promptIcon: Phaser.GameObjects.Image;
+  private abilityIcon: Phaser.GameObjects.Image;
+  private boardIcon: Phaser.GameObjects.Image;
+  private rowIcons: Phaser.GameObjects.Image[];
   private boardGfx: Phaser.GameObjects.Graphics;
   private boardTitle: Phaser.GameObjects.Text;
   private boardRows: { rank: Phaser.GameObjects.Text; name: Phaser.GameObjects.Text; score: Phaser.GameObjects.Text }[];
 
   constructor(private scene: Phaser.Scene) {
     const d = this.d;
+    addIconTextures(scene);
+    const img = (depth: number) => scene.add.image(0, 0, "ic_check").setScrollFactor(0).setDepth(depth).setVisible(false);
     const gfx = (depth: number) => scene.add.graphics().setScrollFactor(0).setDepth(depth);
     const text = (size: number, color: string = CSS.text, display = false, depth = d + 1) =>
       scene.add
@@ -78,17 +89,27 @@ export class Hud {
     this.toastBg = gfx(d + 6);
     this.toastText = text(16, CSS.text, false, d + 7).setOrigin(0, 0).setVisible(false);
     this.note = text(15, CSS.text).setOrigin(0.5, 1).setVisible(false).setStroke("#0b0d12", 4);
-    this.prompt = text(18, CSS.text, true).setOrigin(0.5, 1).setVisible(false);
+    this.prompt = text(18, CSS.text, true).setOrigin(0.5, 1).setVisible(false).setPadding({ left: 28 });
+    this.abilityText.setPadding({ left: 28 });
+    this.titleIcon = img(d + 2);
+    this.hpIcon = img(d + 2);
+    this.promptIcon = img(d + 2);
+    this.abilityIcon = img(d + 2);
+    this.boardIcon = img(d + 4);
+    this.rowIcons = [0, 1, 2, 3].map(() => img(d + 4));
   }
 
-  /** A pill-shaped label behind a text (used for the prompt and ability). */
-  private pill(t: Phaser.GameObjects.Text, accent = false) {
+  /** A pill-shaped label behind a text, with an icon at its left (used for the prompt and ability). */
+  private pill(t: Phaser.GameObjects.Text, ic: Phaser.GameObjects.Image, name: IconName, tint: number, accent = false) {
+    ic.setVisible(t.visible);
     if (!t.visible) return;
     const b = t.getBounds();
     const padX = 14;
     const padY = 7;
-    panel(this.pills, b.x - padX, b.y - padY, b.width + padX * 2, b.height + padY * 2, (b.height + padY * 2) / 2, 0.82);
-    if (accent) this.pills.lineStyle(2, COLOR.green, 0.55).strokeRoundedRect(b.x - padX, b.y - padY, b.width + padX * 2, b.height + padY * 2, (b.height + padY * 2) / 2);
+    const h = b.height + padY * 2;
+    panel(this.pills, b.x - padX, b.y - padY, b.width + padX * 2, h, h / 2, 0.82);
+    if (accent) this.pills.lineStyle(2, COLOR.green, 0.55).strokeRoundedRect(b.x - padX, b.y - padY, b.width + padX * 2, h, h / 2);
+    ic.setTexture(`ic_${name}`).setPosition(b.x + 12, b.y + b.height / 2).setDisplaySize(20, 20).setTint(tint);
   }
 
   setPrompt(text: string | null) {
@@ -103,6 +124,8 @@ export class Hud {
     const shown = visible && rows.length > 0;
     this.boardGfx.clear();
     this.boardTitle.setVisible(shown);
+    this.boardIcon.setVisible(shown);
+    this.rowIcons.forEach((i) => i.setVisible(false));
     this.boardRows.forEach((r) => {
       r.rank.setVisible(false);
       r.name.setVisible(false);
@@ -115,17 +138,19 @@ export class Hud {
     const x = width / 2 - w / 2;
     const y = Math.max(8, belowBanner ? height / 2 + 6 : height / 2 - h / 2);
     panel(this.boardGfx, x, y, w, h, 18, 0.9);
-    this.boardTitle.setText(round > 0 ? `Scores · round ${round}` : "Scores").setPosition(width / 2, y + 12);
+    this.boardTitle.setText(round > 0 ? `Scores · round ${round}` : "Scores").setPosition(width / 2 + 16, y + 12);
+    this.boardIcon.setTexture("ic_trophy").setTint(COLOR.yellow).setDisplaySize(26, 26).setPosition(width / 2 - this.boardTitle.width / 2 + 0, y + 26);
     const medal = [0xfacc15, 0xcbd5e1, 0xd08a4e, 0x64748b];
     rows.slice(0, 4).forEach((row, i) => {
       const cy = y + 62 + i * rowH + rowH / 2 - 2;
       if (row.me) this.boardGfx.fillStyle(COLOR.yellow, 0.14).fillRoundedRect(x + 8, cy - rowH / 2 + 2, w - 16, rowH - 4, 10);
       this.boardGfx.fillStyle(medal[i] ?? 0x64748b, 1).fillCircle(x + 30, cy, 4);
       const r = this.boardRows[i]!;
-      const tag = row.role === "hunter" ? "  🔍" : "";
+      if (row.role === "hunter") this.rowIcons[i]!.setTexture("ic_search").setTint(COLOR.blue).setDisplaySize(18, 18).setVisible(true);
       r.rank.setText(`${i + 1}`).setPosition(x + 42, cy).setVisible(true);
-      r.name.setText(`${row.name}${tag}`).setColor(row.me ? CSS.yellow : CSS.text).setPosition(x + 70, cy).setVisible(true);
+      r.name.setText(row.name).setColor(row.me ? CSS.yellow : CSS.text).setPosition(x + 70, cy).setVisible(true);
       r.name.setCrop(0, 0, w - 160, 40);
+      if (row.role === "hunter") this.rowIcons[i]!.setPosition(x + 70 + Math.min(r.name.width, w - 160) + 14, cy);
       r.score.setText(`${row.score}${row.gain > 0 ? `  +${row.gain}` : ""}`).setColor(row.gain > 0 ? CSS.green : row.me ? CSS.yellow : CSS.text).setPosition(x + w - 20, cy).setVisible(true);
     });
   }
@@ -159,6 +184,8 @@ export class Hud {
       return;
     }
     const ready = cooldown <= 0;
+    this.abilityName = label === "Radar" ? "radar" : "megaphone";
+    this.abilityReady = ready;
     this.abilityText
       .setText(ready ? `F · ${label}` : `F · ${label}  ${cooldown}s`)
       .setColor(ready ? CSS.green : CSS.dim)
@@ -212,6 +239,7 @@ export class Hud {
 
     if (!info.connected) {
       this.title.setText("Connecting…").setVisible(true).setPosition(width / 2, 22);
+      this.titleIcon.setVisible(false);
       this.sub.setText("").setVisible(false);
       this.drawTop(width, 22, 0, -1);
       return;
@@ -253,7 +281,12 @@ export class Hud {
     }
     this.title.setText(title).setVisible(title !== "");
     this.sub.setText(sub).setVisible(sub !== "");
-    this.title.setPosition(width / 2, 14);
+    const titleIcon: IconName | null =
+      info.phase === "end" ? "trophy" : info.role === "spectator" || (!info.alive && info.phase === "hunt") ? "binoculars" : isHunter ? "search" : info.phase === "hide" ? "hide" : info.phase === "hunt" ? "ghost" : null;
+    this.titleIcon.setVisible(!!titleIcon && title !== "");
+    if (titleIcon) this.titleIcon.setTexture(`ic_${titleIcon}`).setTint(info.phase === "end" ? COLOR.yellow : isHunter ? COLOR.blue : COLOR.green).setDisplaySize(26, 26);
+    this.title.setPosition(width / 2 + 17, 14);
+    this.titleIcon.setPosition(width / 2 - this.title.width / 2 - 1, 14 + this.title.height / 2 + 1);
     this.sub.setPosition(width / 2, 14 + this.title.height + 0);
     this.hint.setText(this.touchMode ? "" : hint).setPosition(26, height - 16);
 
@@ -272,7 +305,8 @@ export class Hud {
     // Hunter health: a heart and a rounded bar, top right.
     const showHp = isHunter && (info.phase === "hide" || info.phase === "hunt");
     this.hpGfx.clear();
-    this.hpLabel.setVisible(showHp);
+    this.hpLabel.setVisible(false);
+    this.hpIcon.setVisible(showHp);
     if (showHp) {
       const w = 150;
       const bx = width - 26 - w;
@@ -281,13 +315,13 @@ export class Hud {
       this.hpGfx.fillStyle(0x000000, 0.5).fillRoundedRect(bx, by, w, 14, 7);
       const k = Math.max(0, Math.min(1, info.hp / HUNTER_MAX_HP));
       if (k > 0) this.hpGfx.fillStyle(k > 0.5 ? COLOR.green : k > 0.25 ? COLOR.yellow : COLOR.red, 1).fillRoundedRect(bx, by, Math.max(14, w * k), 14, 7);
-      this.hpLabel.setText("♥").setColor(CSS.red).setFontSize("22px").setOrigin(0.5).setPosition(bx - 22, by + 7);
+      this.hpIcon.setTexture("ic_heart").setTint(COLOR.red).setDisplaySize(24, 24).setPosition(bx - 22, by + 7);
     }
 
     // Floating pills behind the prompt / ability
     this.pills.clear();
-    this.pill(this.prompt, true);
-    this.pill(this.abilityText);
+    this.pill(this.prompt, this.promptIcon, "hand", COLOR.green, true);
+    this.pill(this.abilityText, this.abilityIcon, this.abilityName, this.abilityReady ? COLOR.green : 0x9aa3b2);
 
     // Result banner
     if (info.phase === "end" && info.winner) {
@@ -311,7 +345,7 @@ export class Hud {
     this.top.clear();
     this.timer.clear();
     if (contentH <= 0) return;
-    const w = Math.min(width - 24, Math.max(this.title.width, this.sub.width) + 56);
+    const w = Math.min(width - 24, Math.max(this.title.width + 36, this.sub.width) + 56);
     const barH = fraction >= 0 ? 10 : 0;
     const h = contentH + barH;
     const x = width / 2 - w / 2;

@@ -2,13 +2,17 @@ import Phaser from "phaser";
 import { FONT_BODY, FONT_DISPLAY } from "./theme.ts";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { Fog } from "./Fog.ts";
+import { addIconTextures } from "./icons.ts";
 import { Lobby, type LobbyPlayer } from "./Lobby.ts";
 import { logOut } from "./gate.ts";
 import { Hud, type BoardRow } from "./Hud.ts";
 import { Sound } from "./Sound.ts";
 import { TouchControls, isTouchDevice } from "./Touch.ts";
-import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, makeLightTextures, placeLights, charKey } from "./art.ts";
+import { drawWorld, makePropTextures, placeProps, makeCharacterTextures, makeLightTextures, placeLights, placeFireflies, charKey } from "./art.ts";
 import {
+  footprint,
+  SWING_REACH,
+  SWING_CONE,
   MSG_INPUT,
   MSG_DISGUISE,
   MSG_UNDISGUISE,
@@ -61,6 +65,7 @@ export class GameScene extends Phaser.Scene {
   private lobby!: Lobby;
   private styleOf = new Map<string, string>();
   private reticle!: Phaser.GameObjects.Graphics;
+  private reticleIcon!: Phaser.GameObjects.Image;
   private hunterView!: Phaser.GameObjects.Graphics;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private skins = new Map<string, Phaser.GameObjects.Image>();
@@ -154,6 +159,8 @@ export class GameScene extends Phaser.Scene {
       logOut,
     });
     this.reticle = this.add.graphics().setDepth(60);
+    addIconTextures(this);
+    this.reticleIcon = this.add.image(0, 0, "ic_search").setDepth(61).setVisible(false);
     // Props can see exactly what the hunter can see (a faint red glow on the floor).
     this.hunterView = this.add.graphics().setDepth(3);
     // The mouse swings where it points. Fingers use the on-screen buttons instead.
@@ -200,6 +207,7 @@ export class GameScene extends Phaser.Scene {
     drawWorld(this, this.map);
     placeProps(this, this.map);
     placeLights(this, this.map);
+    placeFireflies(this, this.map);
     for (const obj of this.children.list) {
       if (!before.has(obj)) {
         this.worldObjects.push(obj);
@@ -431,6 +439,40 @@ export class GameScene extends Phaser.Scene {
     return !!this.room && !!me && me.role === "hunter" && this.room.state.phase === "hunt";
   }
 
+  /** The object (or hiding player) in front of the hunter: the same spots the server checks when swinging. */
+  private focusTarget(state: GameState): { x: number; y: number; w: number; h: number } | null {
+    const id = this.room?.sessionId;
+    const dot = id ? this.sprites.get(id) : undefined;
+    if (!dot || !id) return null;
+    const base = this.chars.get(id)?.rotation ?? Math.PI / 2;
+    const SLOP = 6;
+    const offsets = [0, SWING_CONE / 2, -SWING_CONE / 2, SWING_CONE, -SWING_CONE];
+    for (const dist of [26, 42, SWING_REACH]) {
+      for (const off of offsets) {
+        const px = dot.x + Math.cos(base + off) * dist;
+        const py = dot.y + Math.sin(base + off) * dist;
+        let best: { x: number; y: number; w: number; h: number; d: number } | null = null;
+        const consider = (x: number, y: number, w: number, h: number) => {
+          if (Math.abs(px - x) > w / 2 + SLOP || Math.abs(py - y) > h / 2 + SLOP) return;
+          const d = Math.hypot(px - x, py - y);
+          if (!best || d < best.d) best = { x, y, w, h, d };
+        };
+        for (const p of this.map.props) {
+          const fp = footprint(p.type, p.rot);
+          consider(p.x, p.y, fp.w, fp.h);
+        }
+        state.bodies.forEach((b: BodyState, bid: string) => {
+          const info = state.players.get(bid);
+          if (bid === id || !b.disguise || !info || info.role !== "prop" || !info.alive) return;
+          const fp = footprint(b.disguise, b.rot);
+          consider(b.x, b.y, fp.w, fp.h);
+        });
+        if (best) return best;
+      }
+    }
+    return null;
+  }
+
   /** The spot in front of the hunter, the way they last walked. Swings and inspections land here. */
   private aimWorld(): { x: number; y: number } {
     const id = this.room?.sessionId;
@@ -561,7 +603,7 @@ export class GameScene extends Phaser.Scene {
     if (e.result === "nothing") return;
     if (e.result === "prop" && this.me?.role === "hunter") this.cameras.main.shake(130, 0.005);
     const label = this.add
-      .text(e.x, e.y - 20, e.result === "player" ? "CAUGHT!" : e.result === "caught" ? "FOUND! Catch them!" : e.result === "escaped" ? "Escaped!" : "Just an object", {
+      .text(e.x, e.y - 20, e.result === "player" ? "Got you!" : e.result === "caught" ? "Found you! Tag them!" : e.result === "escaped" ? "Escaped!" : "Just an object", {
         fontFamily: FONT_DISPLAY,
         fontSize: "19px",
         fontStyle: "600",
@@ -754,11 +796,23 @@ export class GameScene extends Phaser.Scene {
       const moving = len > 0.05;
       if (moving) {
         const step = (moveSpeed(me.role, !!myBody.disguise, me.chase > 0) * Math.min(delta, 50) * Math.min(1, len)) / 1000;
+        // Players disguised as objects are solid (only the ones we can see).
+        const solid = (px: number, py: number, r: number) => {
+          let hit = false;
+          state.bodies.forEach((o: BodyState, oid: string) => {
+            if (hit || oid === room.sessionId || !o.disguise) return;
+            const op = state.players.get(oid);
+            if (!op || op.role !== "prop" || !op.alive) return;
+            const fp = footprint(o.disguise, o.rot);
+            if (Math.abs(px - o.x) < fp.w / 2 + r && Math.abs(py - o.y) < fp.h / 2 + r) hit = true;
+          });
+          return hit;
+        };
         const pieces = Math.max(1, Math.ceil(step / 6));
         let x = dot.x;
         let y = dot.y;
         for (let i = 0; i < pieces; i++) {
-          const n = this.map.moveWithCollision(x, y, ((dx / len) * step) / pieces, ((dy / len) * step) / pieces, PLAYER_RADIUS);
+          const n = this.map.moveWithCollision(x, y, ((dx / len) * step) / pieces, ((dy / len) * step) / pieces, PLAYER_RADIUS, solid);
           x = n.x;
           y = n.y;
         }
@@ -810,18 +864,45 @@ export class GameScene extends Phaser.Scene {
       if (phase === "hide") this.fog.blind();
       else this.fog.see(myDot.x, myDot.y, this.map);
       if (phase === "hunt") {
-        const aim = me.inspect > 0 ? this.inspectAim : this.aimWorld();
+        // Auto-focus: the thing the hunter would hit gets a friendly glowing frame.
+        const focus = me.inspect > 0 ? null : this.focusTarget(state);
+        const aim = focus ? { x: focus.x, y: focus.y } : me.inspect > 0 ? this.inspectAim : this.aimWorld();
         const ax = aim.x;
         const ay = aim.y;
-        this.reticle.lineStyle(2, 0xffffff, 0.9).strokeCircle(ax, ay, 9).lineBetween(ax - 13, ay, ax + 13, ay).lineBetween(ax, ay - 13, ax, ay + 13);
+        const pulse = 1 + Math.sin(time / 160) * 0.05;
+        if (focus) {
+          const w = (focus.w + 14) * pulse;
+          const h = (focus.h + 14) * pulse;
+          const arm = Math.min(14, w / 3, h / 3);
+          const x0 = ax - w / 2;
+          const x1 = ax + w / 2;
+          const y0 = ay - h / 2;
+          const y1 = ay + h / 2;
+          const g = this.reticle;
+          g.fillStyle(0xffd166, 0.12).fillRoundedRect(x0, y0, w, h, 8);
+          g.lineStyle(3, 0xffd166, 1);
+          for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]] as const) {
+            g.beginPath().moveTo(cx, cy + sy * arm).lineTo(cx, cy).lineTo(cx + sx * arm, cy).strokePath();
+          }
+          this.reticleIcon.setPosition(ax, y0 - 14).setDisplaySize(20, 20).setTint(0xffd166).setAlpha(1).setVisible(true);
+        } else if (me.inspect <= 0) {
+          // Nothing in reach: a small soft ring where a swing would land.
+          this.reticle.lineStyle(2, 0xffffff, 0.45).strokeCircle(ax, ay, 8);
+          this.reticle.fillStyle(0xffffff, 0.45).fillCircle(ax, ay, 2);
+          this.reticleIcon.setVisible(false);
+        }
         // Inspecting: a ring fills up around the thing being checked.
         if (me.inspect > 0) {
+          this.reticleIcon.setVisible(false);
           this.reticle.lineStyle(3, 0x5ad1ff, 0.25).strokeCircle(ax, ay, 24);
           this.reticle.lineStyle(5, 0x5ad1ff, 1).beginPath().arc(ax, ay, 24, -Math.PI / 2, -Math.PI / 2 + (me.inspect / 100) * Math.PI * 2).strokePath();
         }
+      } else {
+        this.reticleIcon.setVisible(false);
       }
     } else {
       this.fog.hide();
+      this.reticleIcon.setVisible(false);
     }
 
     // Everyone else can see exactly where the hunter can see.
@@ -843,8 +924,8 @@ export class GameScene extends Phaser.Scene {
         const k = d > VISION_RADIUS ? VISION_RADIUS / d : 1;
         return new Phaser.Math.Vector2(hx + (q.x - hx) * k, hy + (q.y - hy) * k);
       });
-      this.hunterView.fillStyle(0xef4444, 0.16).fillPoints(pts, true);
-      this.hunterView.lineStyle(2, 0xef4444, 0.45).strokePoints(pts, true);
+      this.hunterView.fillStyle(0xffb347, 0.14).fillPoints(pts, true);
+      this.hunterView.lineStyle(2, 0xffc46b, 0.4).strokePoints(pts, true);
     }
 
     // Round changed: forget what was ticked off.
