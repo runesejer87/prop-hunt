@@ -996,6 +996,7 @@ export class GameScene extends Phaser.Scene {
     if (this.touch) {
       const mode = !me.alive || me.role === "spectator" || phase === "end" ? "none" : me.role === "hunter" ? "hunter" : "prop";
       const abilityOn = phase === "hunt" && me.alive && (me.role === "hunter" || me.role === "prop");
+      this.hud.setBottomLimit(this.touch.topEdge);
       this.touch.update(mode, abilityOn ? { label: me.role === "hunter" ? "Radar" : "Distract", cooldown: me.cooldown } : null);
     }
 

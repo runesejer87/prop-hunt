@@ -40,6 +40,8 @@ export class Hud {
   private warning: Phaser.GameObjects.Text;
   private touchMode = false;
   private panelBottom = 0;
+  /** Messages near the bottom stay above this screen y (the touch buttons). */
+  private bottomLimit = Infinity;
   private abilityName: IconName = "radar";
   private abilityReady = true;
   private titleIcon: Phaser.GameObjects.Image;
@@ -114,9 +116,19 @@ export class Hud {
     ic.setTexture(`ic_${name}`).setPosition(b.x + 12, b.y + b.height / 2).setDisplaySize(20, 20).setTint(tint);
   }
 
+  setBottomLimit(y: number) {
+    this.bottomLimit = y;
+  }
+
+  /** Screen y of the bottom of the message area: above the home bar, and above the touch buttons. */
+  private messageBottom(): number {
+    const { height } = this.scene.scale;
+    return Math.min(height - getInsets().bottom - (this.touchMode ? 14 : 46), this.bottomLimit - 14);
+  }
+
   setPrompt(text: string | null) {
     const { width, height } = this.scene.scale;
-    if (text) this.prompt.setText(text).setPosition(width / 2, height - getInsets().bottom - (this.touchMode ? 30 : 46)).setVisible(true);
+    if (text) this.prompt.setText(text).setPosition(width / 2, this.messageBottom()).setVisible(true);
     else this.prompt.setVisible(false);
   }
 
@@ -212,7 +224,7 @@ export class Hud {
   /** Small status line above the prompt, e.g. whether you are a perfect copy yet. */
   setNote(text: string | null, color = "#ffffff") {
     const { width, height } = this.scene.scale;
-    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, height - getInsets().bottom - (this.touchMode ? 70 : 88)).setVisible(true);
+    if (text) this.note.setText(text).setColor(color).setPosition(width / 2, this.messageBottom() - 42).setVisible(true);
     else this.note.setVisible(false);
   }
 
@@ -233,7 +245,8 @@ export class Hud {
     fraction?: number;
   }) {
     const { width, height } = this.scene.scale;
-    const wrap = Math.max(160, Math.min(width - 48, 700));
+    const side = this.touchMode ? 130 : 48; // on touch screens the scores / sound buttons sit at the right edge
+    const wrap = Math.max(160, Math.min(width - side, 700));
     this.title.setWordWrapWidth(wrap);
     this.sub.setWordWrapWidth(wrap);
     this.banner.setPosition(width / 2, Math.max(110, height * 0.34));
@@ -350,7 +363,7 @@ export class Hud {
     this.top.clear();
     this.timer.clear();
     if (contentH <= 0) return;
-    const w = Math.min(width - 24, Math.max(this.title.width + 36, this.sub.width) + 56);
+    const w = Math.min(width - (this.touchMode ? 130 : 24), Math.max(this.title.width + 36, this.sub.width) + 56);
     const barH = fraction >= 0 ? 10 : 0;
     const h = contentH + barH;
     const x = width / 2 - w / 2;

@@ -52,6 +52,8 @@ const STICK_BASE = 58;
 export class TouchControls {
   /** Movement from the joystick: each part from -1 to 1 (0, 0 when not touching). */
   vector = { x: 0, y: 0 };
+  /** Top edge (screen y) of the lowest-left cluster of visible buttons; messages sit above it. */
+  topEdge = Infinity;
   /** Is the scoreboard button held down? */
   scoresHeld = false;
 
@@ -307,6 +309,10 @@ export class TouchControls {
     } else {
       for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
+    // Where the action buttons start, so the game's messages can stay above them.
+    let top = Infinity;
+    for (const [key, b] of this.buttons) if (key !== "scores" && key !== "mute" && b.circle.visible) top = Math.min(top, b.circle.y - b.radius);
+    this.topEdge = top;
     this.place("scores", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k, 17 * k, "≡", "", true, "scores");
     this.place("mute", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), this.inset.top + 70 * k + 42 * k, 15 * k, "♪", "", true, "sound");
   }
