@@ -66,6 +66,8 @@ export class GameScene extends Phaser.Scene {
   private styleOf = new Map<string, string>();
   private reticle!: Phaser.GameObjects.Graphics;
   private reticleIcon!: Phaser.GameObjects.Image;
+  private curInput = { dx: 0, dy: 0 };
+  private frameDelta = 16.7;
   private hunterView!: Phaser.GameObjects.Graphics;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private skins = new Map<string, Phaser.GameObjects.Image>();
@@ -144,6 +146,21 @@ export class GameScene extends Phaser.Scene {
     const unlock = () => this.sfx.unlock();
     this.input.keyboard!.on("keydown", unlock);
     this.input.on("pointerdown", unlock);
+    // iPhones and iPads only allow sound from the moment a finger lifts.
+    this.input.on("pointerup", unlock);
+    window.addEventListener("touchend", unlock, { passive: true });
+
+    // If the page loses focus (app switch, notification, a held key never "lifting"), stop walking.
+    const letGo = () => {
+      this.lastInput = { dx: 0, dy: 0 };
+      this.room?.send(MSG_INPUT, { dx: 0, dy: 0 });
+      this.touch?.releaseAll();
+      this.input.keyboard?.resetKeys();
+    };
+    window.addEventListener("blur", letGo);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) letGo();
+    });
 
     // Dark edges around the screen, and a gentle zoom-in when the game starts.
     this.vignette = this.add.image(0, 0, "vignette").setOrigin(0).setScrollFactor(0).setDepth(90);
@@ -666,10 +683,13 @@ export class GameScene extends Phaser.Scene {
       if (img.texture.key !== tex) img.setTexture(tex);
 
       // Everyone faces the way they walk. The hunter swings and inspects that way.
+      // Turning is smooth and the same speed at any frame rate. You face where you push (like the server
+      // does), even when a wall stops you; others face the way they actually travel.
       void me;
-      if (moved > 0.4) {
-        img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(dot.y - last.y, dot.x - last.x), 0.25);
-      }
+      const turn = 0.25 * Math.min(this.frameDelta, 50) / 16.7;
+      const mine = id === myId && Math.hypot(this.curInput.dx, this.curInput.dy) > 0.05;
+      if (mine) img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(this.curInput.dy, this.curInput.dx), turn);
+      else if (moved > 0.4) img.rotation = Phaser.Math.Angle.RotateTo(img.rotation, Math.atan2(dot.y - last.y, dot.x - last.x), turn);
 
       // Footsteps every so often while moving. Ghosts are silent.
       if (moved < 0.2 || moved > 60 || !info.alive || info.role === "spectator") return;
@@ -749,6 +769,8 @@ export class GameScene extends Phaser.Scene {
     const useStick = Math.abs(stick.x) + Math.abs(stick.y) > 0.01;
     const dx = frozen ? 0 : useStick ? stick.x : key.x;
     const dy = frozen ? 0 : useStick ? stick.y : key.y;
+    this.curInput = { dx, dy };
+    this.frameDelta = delta;
     // Send when it changes (a joystick changes a lot, so not more often than every 40 ms).
     const changed = Math.abs(dx - this.lastInput.dx) > 0.04 || Math.abs(dy - this.lastInput.dy) > 0.04;
     const stopped = dx === 0 && dy === 0 && (this.lastInput.dx !== 0 || this.lastInput.dy !== 0);
@@ -828,8 +850,9 @@ export class GameScene extends Phaser.Scene {
         dot.x = Phaser.Math.Linear(dot.x, p.x, 0.2); // standing still: settle
         dot.y = Phaser.Math.Linear(dot.y, p.y, 0.2);
       } else if (err > 60) {
-        dot.x = Phaser.Math.Linear(dot.x, p.x, 0.08);
-        dot.y = Phaser.Math.Linear(dot.y, p.y, 0.08);
+        const kk = 1 - Math.pow(0.92, Math.min(delta, 50) / 16.7);
+        dot.x = Phaser.Math.Linear(dot.x, p.x, kk);
+        dot.y = Phaser.Math.Linear(dot.y, p.y, kk);
       }
     });
 
@@ -978,7 +1001,7 @@ export class GameScene extends Phaser.Scene {
     let prompt: string | null = null;
     if (myDot && me.role === "prop" && me.alive && phase !== "end") {
       const near = this.map.nearestDisguisableProp(myDot.x, myDot.y);
-      if (near && near.type !== myBody.disguise) prompt = `E: become ${PROP_TYPES[near.type]!.name}`;
+      if (near && near.type !== myBody.disguise) prompt = `${this.touch ? "Tap Become" : "E: become"}: ${PROP_TYPES[near.type]!.name}`;
     }
     this.hud.setPrompt(prompt);
 

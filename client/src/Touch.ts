@@ -40,7 +40,7 @@ interface Btn {
 }
 
 const DEAD_ZONE = 0.14;
-const STICK_RADIUS = 58;
+const STICK_BASE = 58;
 
 /**
  * On-screen controls for phones and tablets: a floating joystick anywhere on the left half of the
@@ -55,6 +55,10 @@ export class TouchControls {
   private base: Phaser.GameObjects.Arc;
   private thumb: Phaser.GameObjects.Arc;
   private stickId: number | null = null;
+  /** Joystick size: bigger on a tablet. */
+  private stickR = STICK_BASE;
+  private inset = { left: 0, right: 0, bottom: 0, top: 0 };
+  private probe?: HTMLDivElement;
   private stickOrigin = { x: 0, y: 0 };
   private buttons = new Map<Key, Btn>();
   private mode: TouchMode = "none";
@@ -67,7 +71,7 @@ export class TouchControls {
   ) {
     const d = 110;
     addIconTextures(scene);
-    this.base = scene.add.circle(0, 0, STICK_RADIUS, 0xffffff, 0.1).setStrokeStyle(3, 0xffffff, 0.3).setScrollFactor(0).setDepth(d).setVisible(false);
+    this.base = scene.add.circle(0, 0, this.stickR, 0xffffff, 0.1).setStrokeStyle(3, 0xffffff, 0.3).setScrollFactor(0).setDepth(d).setVisible(false);
     this.thumb = scene.add.circle(0, 0, 26, 0xffffff, 0.35).setStrokeStyle(2, 0xffffff, 0.6).setScrollFactor(0).setDepth(d + 1).setVisible(false);
 
     const colors: Record<Key, number> = { main: 0x4ade80, a: 0x60a5fa, b: 0xf59e0b, ability: 0xa78bfa, taunt: 0xf472b6, scores: 0x94a3b8, mute: 0x94a3b8 };
@@ -91,6 +95,7 @@ export class TouchControls {
     }
 
     scene.input.addPointer(3); // joystick + two buttons at once
+    scene.input.on("pointercancel", this.onUp, this);
     scene.input.on("pointerdown", this.onDown, this);
     scene.input.on("pointermove", this.onMove, this);
     scene.input.on("pointerup", this.onUp, this);
@@ -132,6 +137,59 @@ export class TouchControls {
     if (key === "scores") this.scoresHeld = false;
   }
 
+  /** Let go of everything (the app lost focus, or a finger vanished without telling us). */
+  releaseAll() {
+    this.stickId = null;
+    this.vector = { x: 0, y: 0 };
+    this.base.setVisible(false);
+    this.thumb.setVisible(false);
+    for (const [key, b] of this.buttons) {
+      if (b.holder !== null) {
+        b.holder = null;
+        b.circle.setFillStyle(b.color, 0.28);
+        this.up(key);
+      }
+    }
+  }
+
+  /** iOS sometimes cancels touches (system swipes, notifications) without a normal "finger up". Catch that. */
+  private checkStuck() {
+    const pointers = this.scene.input.manager.pointers;
+    const down = (id: number) => pointers.some((p) => p.id === id && p.isDown);
+    if (this.stickId !== null && !down(this.stickId)) {
+      this.stickId = null;
+      this.vector = { x: 0, y: 0 };
+      this.base.setVisible(false);
+      this.thumb.setVisible(false);
+    }
+    for (const [key, b] of this.buttons) {
+      if (b.holder !== null && !down(b.holder)) {
+        b.holder = null;
+        b.circle.setFillStyle(b.color, 0.28);
+        this.up(key);
+      }
+    }
+  }
+
+  /** The screen edges that are covered by notches and the home bar (from the CSS safe areas). */
+  private readInsets() {
+    if (!this.probe) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+        "padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+      document.body.appendChild(el);
+      this.probe = el;
+    }
+    const cs = getComputedStyle(this.probe);
+    this.inset = {
+      top: parseFloat(cs.paddingTop) || 0,
+      right: parseFloat(cs.paddingRight) || 0,
+      bottom: parseFloat(cs.paddingBottom) || 0,
+      left: parseFloat(cs.paddingLeft) || 0,
+    };
+  }
+
   // -------------------------------------------------------------- touches
 
   private buttonAt(x: number, y: number): Key | null {
@@ -168,12 +226,12 @@ export class TouchControls {
     let dx = pointer.x - this.stickOrigin.x;
     let dy = pointer.y - this.stickOrigin.y;
     const len = Math.hypot(dx, dy);
-    if (len > STICK_RADIUS) {
-      dx = (dx / len) * STICK_RADIUS;
-      dy = (dy / len) * STICK_RADIUS;
+    if (len > this.stickR) {
+      dx = (dx / len) * this.stickR;
+      dy = (dy / len) * this.stickR;
     }
     this.thumb.setPosition(this.stickOrigin.x + dx, this.stickOrigin.y + dy);
-    const m = Math.min(1, len / STICK_RADIUS);
+    const m = Math.min(1, len / this.stickR);
     if (m < DEAD_ZONE) {
       this.vector = { x: 0, y: 0 };
     } else {
@@ -232,11 +290,18 @@ export class TouchControls {
       this.mode = mode;
     }
 
+    this.checkStuck();
+    this.readInsets();
     const { width, height } = this.scene.scale;
     const k = Phaser.Math.Clamp(Math.min(width, height) / 420, 0.85, 1.5);
+    if (this.stickId === null) {
+      this.stickR = STICK_BASE * k;
+      this.base.setRadius(this.stickR);
+      this.thumb.setRadius(26 * k);
+    }
     const R = 42 * k;
-    const cx = width - 28 * k - R;
-    const cy = height - 28 * k - R;
+    const cx = width - Math.max(28 * k, this.inset.right + 12) - R;
+    const cy = height - Math.max(28 * k, this.inset.bottom + 12) - R;
     const cd = ability?.cooldown ?? 0;
     const abilityOn = !!ability;
     const abilityLabel = cd > 0 ? `${cd}` : "F";
@@ -258,14 +323,15 @@ export class TouchControls {
     } else {
       for (const key of ["main", "a", "b", "ability", "taunt"] as Key[]) this.place(key, 0, 0, 0, "", "", false);
     }
-    this.place("scores", width - 30 * k, 92 * k, 17 * k, "≡", "", true, "scores");
-    this.place("mute", width - 30 * k, 92 * k + 42 * k, 15 * k, "♪", "", true, "sound");
+    this.place("scores", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), 92 * k, 17 * k, "≡", "", true, "scores");
+    this.place("mute", width - Math.max(30 * k, this.inset.right + 14 + 17 * k), 92 * k + 42 * k, 15 * k, "♪", "", true, "sound");
   }
 
   destroy() {
     this.scene.input.off("pointerdown", this.onDown, this);
     this.scene.input.off("pointermove", this.onMove, this);
     this.scene.input.off("pointerup", this.onUp, this);
+    this.probe?.remove();
     this.scene.input.off("pointerupoutside", this.onUp, this);
   }
 }

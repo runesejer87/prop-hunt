@@ -30,3 +30,24 @@ if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game =
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 }
+
+// iPhone and iPad: stop pinch-zoom and double-tap-zoom (Safari ignores the viewport setting), and
+// re-measure the screen after turning the device (Safari reports the old size for a moment).
+for (const name of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(name, (e) => e.preventDefault());
+let lastTap = 0;
+document.addEventListener(
+  "touchend",
+  (e) => {
+    const now = Date.now();
+    if (now - lastTap < 300 && (e.target as HTMLElement | null)?.tagName === "CANVAS") e.preventDefault();
+    lastTap = now;
+  },
+  { passive: false },
+);
+const refit = () => {
+  game.scale.refresh();
+  setTimeout(() => game.scale.refresh(), 250);
+  setTimeout(() => game.scale.refresh(), 700);
+};
+window.addEventListener("orientationchange", refit);
+window.visualViewport?.addEventListener("resize", () => game.scale.refresh());

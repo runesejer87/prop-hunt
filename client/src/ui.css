@@ -96,3 +96,4 @@ body { font-family: var(--body); color: var(--text); }
 .ph-lobby h2 { display: inline-flex; align-items: center; gap: 10px; }
 .ph-lobby h2 .ph-icon { color: var(--green); }
 .ph-foot span, .ph-foot a { display: inline-flex; align-items: center; gap: 5px; }
+button, a, input { touch-action: manipulation; }

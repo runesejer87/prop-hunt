@@ -61,6 +61,11 @@ export class Sound {
       this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      // iOS wants a (silent) sound played from a touch before it lets anything else through.
+      const wake = this.ctx.createBufferSource();
+      wake.buffer = this.ctx.createBuffer(1, 1, 22050);
+      wake.connect(this.ctx.destination);
+      wake.start(0);
     }
     if (this.ctx.state === "suspended") void this.ctx.resume();
   }
