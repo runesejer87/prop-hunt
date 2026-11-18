@@ -7,6 +7,26 @@ import { loadIconImages } from "./icons.ts";
 import { joinGame } from "./gate.ts";
 import { GameScene } from "./GameScene.ts";
 
+// iPhone/iPad home-screen app: Safari can report a page height that stops short of the bottom of the
+// screen (the home-bar area stays empty). When installed, use the real screen size instead.
+const standalone = (navigator as unknown as { standalone?: boolean }).standalone === true;
+function fitScreen() {
+  const root = document.documentElement.style;
+  if (!standalone) {
+    root.removeProperty("--app-w");
+    root.removeProperty("--app-h");
+    return;
+  }
+  const long = Math.max(screen.width, screen.height);
+  const short = Math.min(screen.width, screen.height);
+  const landscape = window.innerWidth > window.innerHeight;
+  root.setProperty("--app-w", `${landscape ? long : short}px`);
+  root.setProperty("--app-h", `${landscape ? short : long}px`);
+}
+fitScreen();
+window.addEventListener("resize", fitScreen);
+window.addEventListener("orientationchange", () => setTimeout(fitScreen, 100));
+
 // Join first (this shows the password screen if the server needs one), then start the game.
 await Promise.all([loadFonts(), loadIconImages()]);
 const room = await joinGame();
